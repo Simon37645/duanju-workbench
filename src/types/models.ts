@@ -505,18 +505,19 @@ export interface WhisperModelInfo {
   multilingual: boolean;
 }
 
-/* ------------------------------------------------------------- 知识包 */
+/* --------------------------------------------------------------- 技能 */
 
-export type KnowledgeKind = "methodology" | "style" | "checklist" | "reference" | string;
-
-export interface KnowledgePack {
+export interface Skill {
   id: string;
   name: string;
-  kind: KnowledgeKind;
-  summary: string;
-  enabled: boolean;
-  path: string;
+  /** 何时使用这个技能 —— 模型靠它决定要不要加载 */
+  description: string;
+  kind: string;
+  /** 目录技能的路径；单文件技能为 null */
+  dir: string | null;
+  entry: string;
+  /** 附件相对路径列表 */
+  files: string[];
   chars: number;
-  /** 解析后的正文（不含 frontmatter） */
-  body: string;
+  enabled: boolean;
 }

@@ -33,8 +33,9 @@ pub const READ_ONLY_TOOLS: &[&str] = &[
     "asset_view_image",
     "file_view_image",
     "ask_user",
-    "knowledge_list",
-    "knowledge_read",
+    "skill_list",
+    "skill_read",
+    "skill_read_file",
 ];
 
 pub fn is_read_only(name: &str) -> bool {
@@ -1141,39 +1142,50 @@ async fn t_asset_generate_missing(ctx: ToolCtx, args: Value) -> Result<ToolOutco
     ))
 }
 
-/* ========================== 用户知识包 ========================== */
+/* ============================ 技能库 ============================ */
 
-async fn t_knowledge_list(ctx: ToolCtx, _args: Value) -> Result<ToolOutcome> {
-    let packs = crate::knowledge::list(&ctx.state);
-    if packs.is_empty() {
+async fn t_skill_list(ctx: ToolCtx, _args: Value) -> Result<ToolOutcome> {
+    let skills = crate::skills::list(&ctx.state);
+    if skills.is_empty() {
         return Ok(ToolOutcome::text(
-            "用户还没有装知识包。可以在「设置 → 知识包」里导入 Markdown。",
+            "用户还没有装技能。可以在「设置 → 技能」里导入 Markdown 或技能目录。",
         ));
     }
-    let items: Vec<Value> = packs
+    let items: Vec<Value> = skills
         .iter()
-        .map(|p| {
+        .map(|s| {
             json!({
-                "id": p.id, "name": p.name, "kind": p.kind,
-                "summary": p.summary, "chars": p.chars, "enabled": p.enabled,
+                "id": s.id, "name": s.name, "description": s.description,
+                "chars": s.chars, "files": s.files, "enabled": s.enabled,
             })
         })
         .collect();
     Ok(ToolOutcome::new(
-        format!("共 {} 个知识包", items.len()),
+        format!("共 {} 个技能", items.len()),
         json!(items),
     ))
 }
 
-async fn t_knowledge_read(ctx: ToolCtx, args: Value) -> Result<ToolOutcome> {
+async fn t_skill_read(ctx: ToolCtx, args: Value) -> Result<ToolOutcome> {
     let id = arg_str(&args, "id")?;
-    let body = crate::knowledge::read(&ctx.state, &id)?;
+    let body = crate::skills::read_body(&ctx.state, &id)?;
     let chars = body.chars().count();
-    // 太长的包分片给，避免一次撑爆上下文
     let text: String = body.chars().take(60000).collect();
     Ok(ToolOutcome::new(
-        format!("已读取知识包「{id}」（{chars} 字）"),
+        format!("已读取技能「{id}」（{chars} 字）"),
         json!({ "id": id, "chars": chars, "truncated": chars > 60000, "body": text }),
+    ))
+}
+
+async fn t_skill_read_file(ctx: ToolCtx, args: Value) -> Result<ToolOutcome> {
+    let id = arg_str(&args, "id")?;
+    let rel = arg_str(&args, "path")?;
+    let text = crate::skills::read_file(&ctx.state, &id, &rel)?;
+    let chars = text.chars().count();
+    let body: String = text.chars().take(60000).collect();
+    Ok(ToolOutcome::new(
+        format!("已读取「{id}」的附件 {rel}（{chars} 字）"),
+        json!({ "id": id, "path": rel, "chars": chars, "truncated": chars > 60000, "body": body }),
     ))
 }
 
@@ -1860,20 +1872,28 @@ pub fn registry(_panel: PanelId) -> Vec<Tool> {
             t_checklist_toggle
         ),
         tool!(
-            "knowledge_list",
-            "列出知识包",
-            "列出用户装的知识包（名称、类型、摘要、字数）。用户说「按我的体系来」时先用它看看有什么。",
+            "skill_list",
+            "列出技能",
+            "列出用户装的技能（名称、用途、附件数）。系统提示里已经有一份目录，只有在需要确认细节时才调它。",
             schema::empty(),
             false,
-            t_knowledge_list
+            t_skill_list
         ),
         tool!(
-            "knowledge_read",
-            "读取知识包正文",
-            "读取某个知识包的完整正文。**只在真正要用的时候读** —— 正文可能几万字，读进来会占上下文。",
-            schema::knowledge_read(),
+            "skill_read",
+            "读取技能正文",
+            "读取某个技能的完整正文。**只在判断这个技能确实对得上当前任务时才读** —— 正文可能几万字，读进来会占上下文。",
+            schema::skill_read(),
             false,
-            t_knowledge_read
+            t_skill_read
+        ),
+        tool!(
+            "skill_read_file",
+            "读取技能附件",
+            "读取技能目录里的附件（如 references/xxx.md）。技能正文通常会指明该看哪个附件。",
+            schema::skill_read_file(),
+            false,
+            t_skill_read_file
         ),
         tool!(
             "ask_user",

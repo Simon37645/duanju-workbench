@@ -189,15 +189,15 @@ export const api = {
   secretsStatus: () => invoke<Record<string, boolean>>("secrets_status"),
   providerTest: (providerId: string) => invoke<string>("provider_test", { providerId }),
 
-  /* ---------------------------------------------------------- 知识包 */
-  knowledgeList: () => invoke<import("@/types/models").KnowledgePack[]>("knowledge_list"),
-  knowledgeRead: (id: string) => invoke<string>("knowledge_read", { id }),
-  knowledgeImport: (paths: string[]) => invoke<string[]>("knowledge_import", { paths }),
-  knowledgeDelete: (id: string) => invoke<void>("knowledge_delete", { id }),
-  knowledgeSetEnabled: (id: string, enabled: boolean) =>
-    invoke<void>("knowledge_set_enabled", { id, enabled }),
-  knowledgeOpenDir: () => invoke<string>("knowledge_open_dir"),
-  knowledgeSave: (id: string, body: string) => invoke<string>("knowledge_save", { id, body }),
+  /* ------------------------------------------------------------ 技能 */
+  skillList: () => invoke<import("@/types/models").Skill[]>("skill_list"),
+  skillRead: (id: string) => invoke<string>("skill_read", { id }),
+  skillReadFile: (id: string, path: string) => invoke<string>("skill_read_file", { id, path }),
+  skillImport: (paths: string[]) => invoke<string[]>("skill_import", { paths }),
+  skillDelete: (id: string) => invoke<void>("skill_delete", { id }),
+  skillSetEnabled: (id: string, enabled: boolean) =>
+    invoke<void>("skill_set_enabled", { id, enabled }),
+  skillOpenDir: () => invoke<string>("skill_open_dir"),
 
   /* -------------------------------------------------------- 网络诊断 */
   proxyStatus: () =>

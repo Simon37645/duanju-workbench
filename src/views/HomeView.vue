@@ -183,10 +183,10 @@ async function browse() {
             <div class="tip">
               <div class="ticon"><BookOpen :size="13" /></div>
               <div class="col" style="gap: 2px; min-width: 0">
-                <span class="t-sm" style="font-weight: 500">装自己的知识包</span>
+                <span class="t-sm" style="font-weight: 500">装自己的技能</span>
                 <span class="t-xs faint" style="line-height: 1.7">
-                  把自己的创作方法论、风格圣经放进「设置 → 知识包」，
-                  Simon 就会按它工作。正文按需读取，不吃缓存。
+                  把自己的流程、规范、方法论做成技能放进「设置 → 技能」，
+                  Simon 用得上时自己去读。三级渐进披露，正文不吃缓存。
                 </span>
               </div>
             </div>

@@ -12,7 +12,7 @@ import UiTextarea from "@/ui/Textarea.vue";
 import UiModal from "@/ui/Modal.vue";
 import UiSegmented from "@/ui/Segmented.vue";
 import UiSpinner from "@/ui/Spinner.vue";
-import KnowledgePanel from "@/components/KnowledgePanel.vue";
+import SkillPanel from "@/components/SkillPanel.vue";
 import { toast } from "@/ui";
 import { api, errorText } from "@/api/ipc";
 import { openPath } from "@tauri-apps/plugin-opener";
@@ -108,7 +108,7 @@ const MODE_HINT: Record<string, string> = {
 
 const TABS = [
   { label: "模型供应商", value: "providers" },
-  { label: "知识包", value: "knowledge" },
+  { label: "技能", value: "skills" },
   { label: "字幕与显卡", value: "asr" },
   { label: "运行环境", value: "runtime" },
 ];
@@ -378,9 +378,9 @@ const asrBackendOptions = computed(() => [
         </div>
       </template>
 
-      <!-- ====================================================== 知识包 -->
-      <template v-else-if="tab === 'knowledge'">
-        <KnowledgePanel />
+      <!-- ======================================================== 技能 -->
+      <template v-else-if="tab === 'skills'">
+        <SkillPanel />
       </template>
 
       <!-- ======================================================== 字幕 -->

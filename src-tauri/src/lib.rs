@@ -14,7 +14,7 @@ pub mod config;
 pub mod error;
 pub mod gen;
 pub mod jobs;
-pub mod knowledge;
+pub mod skills;
 pub mod llm;
 pub mod media;
 pub mod models;
@@ -123,14 +123,14 @@ pub fn run() {
             commands::provider_set_secret,
             commands::secrets_status,
             commands::provider_test,
-            // 知识包
-            commands::knowledge_list,
-            commands::knowledge_read,
-            commands::knowledge_import,
-            commands::knowledge_delete,
-            commands::knowledge_set_enabled,
-            commands::knowledge_open_dir,
-            commands::knowledge_save,
+            // 技能
+            commands::skill_list,
+            commands::skill_read,
+            commands::skill_read_file,
+            commands::skill_import,
+            commands::skill_delete,
+            commands::skill_set_enabled,
+            commands::skill_open_dir,
             commands::proxy_status,
             commands::net_test,
             // 媒体 / ASR

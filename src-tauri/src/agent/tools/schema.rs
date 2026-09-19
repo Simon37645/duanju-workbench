@@ -301,8 +301,18 @@ pub fn asset_generate_missing() -> Value {
     )
 }
 
-pub fn knowledge_read() -> Value {
-    obj(json!({ "id": s("知识包 id，先用 knowledge_list 拿") }), &["id"])
+pub fn skill_read() -> Value {
+    obj(json!({ "id": s("技能 id 或名称") }), &["id"])
+}
+
+pub fn skill_read_file() -> Value {
+    obj(
+        json!({
+            "id": s("技能 id 或名称"),
+            "path": s("附件在技能目录内的相对路径，如 references/formulas.md")
+        }),
+        &["id", "path"],
+    )
 }
 
 pub fn ask_user() -> Value {

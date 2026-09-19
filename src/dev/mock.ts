@@ -395,29 +395,31 @@ export async function mockInvoke(cmd: string, args?: Record<string, unknown>): P
         cameraMoves: ["固定", "横移", "推近", "拉远", "摇摄", "跟随", "升降", "环绕", "手持", "变焦"],
         timeOfDay: ["清晨", "白天", "黄昏", "夜晚", "深夜", "不限"],
       };
-    case "knowledge_list":
+    case "skill_list":
       return [
         {
-          id: "QCH 视觉创作体系", name: "QCH 视觉创作体系", kind: "methodology",
-          summary: "五层创作架构：AI 视觉总监身份、视觉 DNA 十模块、Prompt 模块库、七项自检标准",
-          enabled: true, path: "C:/demo/knowledge/QCH 视觉创作体系.md", chars: 7883,
-          body: "# QCH 个人 AIGC 视觉创作体系\n\n（示例正文）",
+          id: "qch-methodology", name: "QCH 视觉创作体系",
+          description: "用户要按 QCH 体系做视觉创作时使用，含视觉 DNA 十模块、Prompt 模块库与七项自检标准",
+          kind: "skill", dir: "C:/demo/skills/qch-methodology", entry: "C:/demo/skills/qch-methodology/SKILL.md",
+          files: ["references/visual-dna.md", "references/prompt-modules.md"], chars: 7883, enabled: true,
         },
         {
-          id: "QCH STYLE BIBLE V1.0", name: "QCH STYLE BIBLE V1.0", kind: "style",
-          summary: "风格圣经：审美宣言、情绪/色彩/光影/材质/人物/环境六大系统",
-          enabled: true, path: "C:/demo/knowledge/QCH_STYLE_BIBLE_V1.0.md", chars: 14132,
-          body: "# QCH STYLE BIBLE\n\n（示例正文）",
+          id: "剧本节奏检查", name: "剧本节奏检查",
+          description: "用户要检查或优化短剧剧本节奏时使用，含钩子密度与反转间隔的判定标准",
+          kind: "skill", dir: null, entry: "C:/demo/skills/剧本节奏检查.md",
+          files: [], chars: 3200, enabled: true,
         },
         {
-          id: "我的自检清单", name: "我的自检清单", kind: "checklist",
-          summary: "交片前必过的 7 条",
-          enabled: false, path: "C:/demo/knowledge/我的自检清单.md", chars: 320,
-          body: "- [ ] 画面里没有多余手指\n- [ ] 人物特征前后一致",
+          id: "交片自检", name: "交片自检",
+          description: "成片交出去之前逐条核对",
+          kind: "skill", dir: null, entry: "C:/demo/skills/交片自检.md",
+          files: [], chars: 420, enabled: false,
         },
       ];
-    case "knowledge_open_dir":
-      return "C:/Users/demo/AppData/Roaming/com.duanju.workbench/knowledge";
+    case "skill_read":
+      return "# （技能正文示例）\n\n这里会返回 SKILL.md 的完整内容。";
+    case "skill_open_dir":
+      return "C:/Users/demo/AppData/Roaming/com.duanju.workbench/skills";
     case "asr_capabilities":
       return asrCaps;
     case "media_sidecar_status":

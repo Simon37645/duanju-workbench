@@ -32,7 +32,7 @@ pub const LAYER_CORE: &str = "L0 核心指令";
 pub const LAYER_PANEL: &str = "L1 工作台职责";
 pub const LAYER_BIBLE: &str = "L2 项目圣经";
 pub const LAYER_ASSETS: &str = "L3 资产索引";
-pub const LAYER_KNOWLEDGE: &str = "L4 知识包索引";
+pub const LAYER_KNOWLEDGE: &str = "L4 技能库";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

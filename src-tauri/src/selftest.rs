@@ -189,6 +189,48 @@ pub async fn run_asr_download(model_id: &str) -> i32 {
     }
 }
 
+/// 列出已安装的技能，验证技能目录解析是否正常。
+/// ```bash
+/// cargo run -- --skills
+/// ```
+pub async fn run_list_skills() -> i32 {
+    let dir = crate::config::default_config_dir();
+    let state = AppState::new(dir);
+    // 顺带把旧版 knowledge/ 迁移过来、并补上说明文件
+    let _ = crate::skills::ensure_defaults(&state);
+    println!("
+=== 已安装的技能 ===
+");
+    let skills = crate::skills::list(&state);
+    if skills.is_empty() {
+        println!("  （还没有技能）");
+    }
+    for s in &skills {
+        println!(
+            "  [{}] {}
+      {}
+      正文 {} 字{}{}",
+            if s.enabled { "启用" } else { "停用" },
+            s.name,
+            crate::llm::truncate(&s.description, 100),
+            s.chars,
+            if s.files.is_empty() {
+                String::new()
+            } else {
+                format!("，{} 个附件", s.files.len())
+            },
+            if s.dir.is_some() { "，目录技能" } else { "" }
+        );
+    }
+    println!("
+  技能目录：{}
+", crate::skills::skills_dir(&state).display());
+    let idx = crate::skills::prompt_index(&state);
+    println!("  进系统提示的目录：{} 字
+", idx.chars().count());
+    0
+}
+
 pub async fn run_pipeline_check() -> i32 {
     let root = std::env::temp_dir().join("duanju-pipeline-check");
     let _ = std::fs::remove_dir_all(&root);

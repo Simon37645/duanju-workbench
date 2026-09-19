@@ -768,9 +768,9 @@ pub fn resolve_approval(state: &AppState, call_id: &str, approved: bool) -> bool
     }
 }
 
-/// 当前用户装的知识包索引（只含启用中的）
+/// 当前用户装的技能目录（只含启用中的）
 fn knowledge_index(state: &AppState) -> String {
-    crate::knowledge::prompt_index(state)
+    crate::skills::prompt_index(state)
 }
 
 fn resolve_provider(state: &AppState) -> Result<ProviderHandle> {

@@ -16,6 +16,10 @@ fn main() {
         let code = tauri::async_runtime::block_on(duanju_workbench_lib::selftest::run_net_check());
         std::process::exit(code);
     }
+    if args.iter().any(|a| a == "--skills") {
+        let code = tauri::async_runtime::block_on(duanju_workbench_lib::selftest::run_list_skills());
+        std::process::exit(code);
+    }
     if let Some(i) = args.iter().position(|a| a == "--asr-download") {
         let model = args.get(i + 1).cloned().unwrap_or_else(|| "ggml-tiny".into());
         let code =
