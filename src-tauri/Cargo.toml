@@ -1,0 +1,66 @@
+[package]
+name = "duanju-workbench"
+version = "0.1.0"
+description = "短剧全流程制作工作台"
+authors = ["duanju"]
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "duanju_workbench_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["protocol-asset"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", default-features = false, features = [
+    "json",
+    "stream",
+    "multipart",
+    "http2",
+    "rustls-tls-native-roots",
+    "socks",
+] }
+futures-util = "0.3"
+async-trait = "0.1"
+thiserror = "2"
+anyhow = "1"
+parking_lot = "0.12"
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+blake3 = "1"
+base64 = "0.22"
+# 上传到只收公网 URL 的平台（如 第三方平台）时要算文件 md5，用于去重与定位
+md5 = "0.7"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# whisper.cpp 绑定。默认不启用：它需要 cmake + libclang，且 GPU 后端是编译期决定的。
+# 需要时按 README 里的说明选一个后端打开，例如：
+#   cargo build --features asr-cuda      (Windows/Linux + NVIDIA)
+#   cargo build --features asr-metal     (Apple Silicon)
+whisper-rs = { version = "0.14", optional = true }
+
+[features]
+default = []
+asr = ["dep:whisper-rs"]
+asr-cuda = ["asr", "whisper-rs/cuda"]
+asr-metal = ["asr", "whisper-rs/metal"]
+asr-vulkan = ["asr", "whisper-rs/vulkan"]
+asr-coreml = ["asr", "whisper-rs/coreml"]
+asr-openblas = ["asr", "whisper-rs/openblas"]
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

@@ -1,0 +1,27 @@
+// Windows 下发布版不弹控制台窗口
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+fn main() {
+    // 命令行自检：不启动界面
+    //   cargo run -- --pipeline-check   整条生产链跑一遍
+    //   cargo run -- --net-check        代理与模型仓库连通性
+    //   cargo run -- --asr-download ggml-tiny   预下载 whisper 模型
+    let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|a| a == "--pipeline-check") {
+        let code =
+            tauri::async_runtime::block_on(duanju_workbench_lib::selftest::run_pipeline_check());
+        std::process::exit(code);
+    }
+    if args.iter().any(|a| a == "--net-check") {
+        let code = tauri::async_runtime::block_on(duanju_workbench_lib::selftest::run_net_check());
+        std::process::exit(code);
+    }
+    if let Some(i) = args.iter().position(|a| a == "--asr-download") {
+        let model = args.get(i + 1).cloned().unwrap_or_else(|| "ggml-tiny".into());
+        let code =
+            tauri::async_runtime::block_on(duanju_workbench_lib::selftest::run_asr_download(&model));
+        std::process::exit(code);
+    }
+
+    duanju_workbench_lib::run()
+}

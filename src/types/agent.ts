@@ -1,0 +1,126 @@
+/** Agent 事件流协议。与 src-tauri/src/agent/mod.rs 的 AgentEvent 枚举一一对应。 */
+
+import type { PanelId } from "./models";
+
+export interface LayerReport {
+  name: string;
+  chars: number;
+  estTokens: number;
+  /** 该层内容指纹，用于判断前缀是否变动 */
+  hash: string;
+  /** 该层是否挂了 Anthropic 显式缓存断点 */
+  breakpoint: boolean;
+}
+
+export interface PrefixReport {
+  /** 整个稳定前缀的指纹；不变 = 缓存可复用 */
+  fingerprint: string;
+  /** 相对上一次请求，稳定前缀是否发生变化 */
+  stable: boolean;
+  layers: LayerReport[];
+  estTokens: number;
+  note: string;
+}
+
+export interface UsageReport {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  /** 本次会话累计 */
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalCacheReadTokens: number;
+  totalCacheWriteTokens: number;
+  /** 缓存命中率 = cacheRead / (input + cacheRead) */
+  hitRate: number;
+}
+
+export type StopReason =
+  | "endTurn"
+  | "toolUse"
+  | "maxTokens"
+  | "stopSequence"
+  | "refusal"
+  | "error";
+
+export type AgentEvent =
+  | { type: "runStarted"; runId: string; sessionId: string; providerId: string; model: string }
+  | { type: "prefix"; report: PrefixReport }
+  | { type: "reasoningDelta"; text: string }
+  | { type: "textDelta"; text: string }
+  | {
+      type: "toolCall";
+      id: string;
+      name: string;
+      title: string;
+      input: unknown;
+      costly: boolean;
+      needsConfirm: boolean;
+    }
+  | {
+      type: "toolResult";
+      id: string;
+      name: string;
+      ok: boolean;
+      summary: string;
+      data: unknown;
+      durationMs: number;
+    }
+  | { type: "usage"; report: UsageReport }
+  | { type: "round"; round: number }
+  | {
+      type: "runFinished";
+      runId: string;
+      stopReason: StopReason;
+      text: string;
+      error: string | null;
+    }
+  | { type: "error"; message: string };
+
+export interface AgentMessage {
+  id: string;
+  role: "user" | "assistant" | "system";
+  /** 正文（可能含 markdown） */
+  text: string;
+  /** 推理模型的过程输出 */
+  reasoning?: string;
+  toolCalls?: AgentToolCall[];
+  /** 该条消息关联的图片（用户上传或 agent 读取的资产） */
+  images?: string[];
+  createdAt: string;
+  streaming?: boolean;
+}
+
+export interface AgentToolCall {
+  id: string;
+  name: string;
+  title: string;
+  input: unknown;
+  costly: boolean;
+  state: "pending" | "awaiting-approval" | "running" | "ok" | "failed" | "rejected";
+  summary?: string;
+  data?: unknown;
+  durationMs?: number;
+}
+
+export interface AgentSession {
+  id: string;
+  projectId: string;
+  panel: PanelId;
+  title: string;
+  messages: AgentMessage[];
+  running: boolean;
+  lastPrefix?: PrefixReport;
+  lastUsage?: UsageReport;
+  createdAt: string;
+}
+
+export interface AgentRunOptions {
+  /** 用户输入的文本 */
+  input: string;
+  /** 附带图片的绝对路径 */
+  imagePaths?: string[];
+  /** 强制刷新稳定前缀快照（会牺牲一次缓存命中） */
+  refreshContext?: boolean;
+}

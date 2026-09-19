@@ -1,0 +1,724 @@
+//! 自检：不启动界面，直接把整条生产链跑一遍。
+//!
+//! 触发方式：
+//! ```bash
+//! cargo run -- --pipeline-check
+//! ```
+//!
+//! 依次验证：建项目 → 圣经 → 章节 → 风格 → 分镜 → 资产 → 生图 → 提示词 →
+//! 生视频 → 铺时间线 → 导出成片 → 字幕能力探测 → 面板完成度统计。
+//! 返回进程退出码：0 表示全部通过，非 0 表示有步骤失败。
+
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use crate::actions;
+use crate::asr;
+use crate::checklist_ops;
+use crate::jobs::JobCtx;
+use crate::media;
+use crate::models::*;
+use crate::progress;
+use crate::project::Project;
+use crate::state::AppState;
+
+static FAILURES: AtomicU32 = AtomicU32::new(0);
+
+fn ok(step: &str, detail: impl std::fmt::Display) {
+    println!("  [OK] {step}: {detail}");
+}
+
+fn fail(step: &str, detail: impl std::fmt::Display) {
+    println!("  [!!] {step}: {detail}");
+    FAILURES.fetch_add(1, Ordering::SeqCst);
+}
+
+async fn wait_jobs(state: &AppState, timeout: Duration) -> (u32, u32) {
+    let started = Instant::now();
+    loop {
+        let jobs = state.jobs.snapshot();
+        let running = jobs
+            .iter()
+            .filter(|j| matches!(j.status, JobStatus::Running | JobStatus::Queued))
+            .count();
+        if running == 0 || started.elapsed() > timeout {
+            let done = jobs.iter().filter(|j| j.status == JobStatus::Done).count() as u32;
+            let failed = jobs.iter().filter(|j| j.status == JobStatus::Failed).count() as u32;
+            for j in jobs.iter().filter(|j| j.status == JobStatus::Failed) {
+                println!(
+                    "      ! 任务失败 [{}] {}",
+                    j.title,
+                    j.error.clone().unwrap_or_default()
+                );
+            }
+            return (done, failed);
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+}
+
+/// 网络自检：不启动界面，检查代理设置与几个关键地址的连通性。
+///
+/// ```bash
+/// cargo run -- --net-check
+/// ```
+pub async fn run_net_check() -> i32 {
+    let dir = crate::config::default_config_dir();
+    let state = AppState::new(dir);
+    let settings = state.settings();
+
+    println!("\n=== 网络与代理自检 ===\n");
+    let diag = crate::net::diagnostics(&settings);
+    println!("  代理模式        {}", diag["mode"].as_str().unwrap_or("-"));
+    println!(
+        "  环境变量代理    {}",
+        diag["envProxy"].as_str().unwrap_or("（无）")
+    );
+    println!(
+        "  系统代理        {}",
+        diag["systemProxy"].as_str().unwrap_or("（无）")
+    );
+    println!(
+        "  实际使用        {}",
+        diag["effective"].as_str().unwrap_or("直连")
+    );
+    println!("  不走代理的地址  {}\n", diag["noProxy"].as_str().unwrap_or(""));
+
+    let targets = [
+        ("HuggingFace（whisper 模型下载源）", "https://huggingface.co/"),
+        ("hf-mirror 镜像", "https://hf-mirror.com/"),
+        ("Anthropic API", "https://api.anthropic.com/"),
+        ("OpenAI API", "https://api.openai.com/"),
+    ];
+
+    let client = match crate::net::build_client(25, crate::net::resolve_proxy(&settings).as_deref()) {
+        Ok(c) => c,
+        Err(e) => {
+            fail("构建 HTTP 客户端", e);
+            return 1;
+        }
+    };
+
+    for (name, url) in targets {
+        let started = Instant::now();
+        match client.get(url).send().await {
+            Ok(resp) => ok(
+                name,
+                format!(
+                    "HTTP {}（{} ms）",
+                    resp.status().as_u16(),
+                    started.elapsed().as_millis()
+                ),
+            ),
+            Err(e) => {
+                let msg = if e.is_timeout() {
+                    "超时".to_string()
+                } else if e.is_connect() {
+                    "连接失败".to_string()
+                } else {
+                    e.to_string()
+                };
+                fail(name, format!("{msg}（{} ms）", started.elapsed().as_millis()));
+            }
+        }
+    }
+
+    let failures = FAILURES.load(Ordering::SeqCst);
+    println!(
+        "\n{}",
+        if failures == 0 {
+            "=== 网络自检通过 ===".to_string()
+        } else {
+            format!("=== 有 {failures} 个地址不通，去「设置 → 运行环境」调整代理 ===")
+        }
+    );
+    failures as i32
+}
+
+/// 命令行预下载 whisper 模型（不用打开界面）：
+/// ```bash
+/// cargo run -- --asr-download ggml-tiny
+/// ```
+pub async fn run_asr_download(model_id: &str) -> i32 {
+    let dir = crate::config::default_config_dir();
+    let state = AppState::new(dir);
+    println!("\n=== 下载 whisper 模型：{model_id} ===\n");
+    let job = state.jobs.create(JobKind::Download, "模型下载", "准备中");
+    let ctx = JobCtx {
+        id: job.id.clone(),
+        queue: state.jobs.clone(),
+    };
+    let watcher = {
+        let q = state.jobs.clone();
+        let id = job.id.clone();
+        tauri::async_runtime::spawn(async move {
+            let mut last = String::new();
+            loop {
+                tokio::time::sleep(Duration::from_millis(400)).await;
+                if let Some(j) = q.get(&id) {
+                    let line = format!("{:.1}% {}", j.progress * 100.0, j.detail);
+                    if line != last {
+                        println!("  {line}");
+                        last = line.clone();
+                    }
+                    if matches!(
+                        j.status,
+                        JobStatus::Done | JobStatus::Failed | JobStatus::Canceled
+                    ) {
+                        break;
+                    }
+                }
+            }
+        })
+    };
+    let result = crate::asr::download_model(&state, &ctx, model_id).await;
+    let _ = watcher.await;
+    match result {
+        Ok(info) => {
+            ok(
+                "模型下载",
+                format!("{} → {}", info.label, info.path.unwrap_or_default()),
+            );
+            0
+        }
+        Err(e) => {
+            fail("模型下载", e);
+            1
+        }
+    }
+}
+
+pub async fn run_pipeline_check() -> i32 {
+    let root = std::env::temp_dir().join("duanju-pipeline-check");
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+
+    let state = AppState::new(root.join("_config"));
+    println!("\n=== 短剧工作台 · 端到端自检 ===\n");
+
+    /* ---------------------------------------------------------- 项目 */
+    let project = match Project::create(&root, "自检项目") {
+        Ok(p) => p,
+        Err(e) => {
+            fail("建项目", e);
+            return 1;
+        }
+    };
+    let paths = project.paths.clone();
+    state.set_project(Some(project));
+    ok("建项目", paths.root.display());
+
+    /* ---------------------------------------------------------- 设置 */
+    let settings = AppSettings {
+        providers: vec![
+            ProviderConfig {
+                id: "mock-llm".into(),
+                kind: ProviderKind::Llm,
+                name: "占位文本".into(),
+                adapter: "mock".into(),
+                model: "mock-model".into(),
+                enabled: true,
+                concurrency: 1,
+                timeout_sec: 300,
+                ..Default::default()
+            },
+            ProviderConfig {
+                id: "mock-image".into(),
+                kind: ProviderKind::Image,
+                name: "占位生图".into(),
+                adapter: "mock".into(),
+                model: "mock-image".into(),
+                enabled: true,
+                concurrency: 2,
+                timeout_sec: 300,
+                ..Default::default()
+            },
+            ProviderConfig {
+                id: "mock-video".into(),
+                kind: ProviderKind::Video,
+                name: "占位生视频".into(),
+                adapter: "mock".into(),
+                model: "mock-video".into(),
+                enabled: true,
+                concurrency: 2,
+                timeout_sec: 600,
+                ..Default::default()
+            },
+        ],
+        active_llm_provider_id: Some("mock-llm".into()),
+        active_image_provider_id: Some("mock-image".into()),
+        active_video_provider_id: Some("mock-video".into()),
+        confirm_costly_tools: false,
+        ..Default::default()
+    };
+    state.save_settings(&settings).unwrap();
+    ok("写入设置", format!("{} 个 provider", settings.providers.len()));
+
+    match state.http_client() {
+        Ok(_) => ok("HTTP 客户端", "已构建"),
+        Err(e) => fail("HTTP 客户端", e),
+    }
+
+    /* ------------------------------------------------------ 圣经与风格 */
+    state
+        .mutate(|p| {
+            p.manifest.genre = "都市甜宠".into();
+            p.manifest.logline = "被退婚那天，她捡到了全城最贵的男人".into();
+            p.bible.synopsis = "女主被退婚，意外救下重伤的集团继承人，两人从契约婚姻走向真心。".into();
+            p.bible.selling_points = vec!["开局退婚打脸".into(), "契约婚姻先婚后爱".into()];
+            p.bible.characters = vec![CharacterCard {
+                id: new_id("chr"),
+                name: "苏晚".into(),
+                role: "女主".into(),
+                appearance: "二十出头，酒红色长直发，锁骨处有颗小痣".into(),
+                personality: "外柔内刚".into(),
+                ..Default::default()
+            }];
+            p.style.spec.name = "都市甜宠".into();
+            p.style.spec.prompt = "电影级质感，暖调高饱和，柔光竖屏人像，浅景深".into();
+            p.style.spec.negative = "低分辨率, 畸变, 水印".into();
+            p.style.spec.aspect_ratio = "9:16".into();
+            Ok(())
+        })
+        .unwrap();
+    ok("项目圣经 + 风格圣经", "已写入");
+
+    /* ---------------------------------------------------------- 章节 */
+    state
+        .mutate(|p| {
+            for i in 1..=2u32 {
+                let id = format!("ch_{i:03}");
+                p.script.chapters.push(ChapterMeta {
+                    id: id.clone(),
+                    index: i,
+                    title: format!("第 {i} 章"),
+                    status: ChapterStatus::Empty,
+                    summary: format!("第 {i} 章大纲"),
+                    characters: vec!["苏晚".into()],
+                    scenes: vec![],
+                    word_count: 0,
+                    updated_at: now_iso(),
+                });
+                p.save_chapter_content(
+                    &id,
+                    &format!("第 {i} 章的正文内容。苏晚推开门，看见他坐在轮椅上。"),
+                )?;
+            }
+            Ok(())
+        })
+        .unwrap();
+    let (chapters, wc) = state
+        .read(|p| (p.script.chapters.len(), p.script.chapters[0].word_count))
+        .unwrap();
+    ok("章节", format!("{chapters} 章，第一章 {wc} 字"));
+
+    /* ---------------------------------------------------------- 分镜 */
+    state
+        .mutate(|p| {
+            for (i, action) in [
+                "苏晚推门而入，目光落在轮椅上的人身上",
+                "男人抬眼，唇角微微一勾",
+            ]
+            .iter()
+            .enumerate()
+            {
+                p.shots.push(Shot {
+                    id: new_id("sh"),
+                    chapter_id: "ch_001".into(),
+                    index: i as u32 + 1,
+                    scene_id: None,
+                    location: "别墅客厅".into(),
+                    time_of_day: "黄昏".into(),
+                    interior: true,
+                    shot_size: if i == 0 { "全景" } else { "特写" }.into(),
+                    camera: "平视".into(),
+                    camera_move: if i == 0 { "推近" } else { "固定" }.into(),
+                    duration_sec: if i == 0 { 3.0 } else { 2.5 },
+                    characters: vec!["苏晚".into()],
+                    props: vec![],
+                    action: action.to_string(),
+                    dialogue: String::new(),
+                    narration: String::new(),
+                    sfx: String::new(),
+                    bgm: String::new(),
+                    image_prompt: String::new(),
+                    video_prompt: String::new(),
+                    ref_images: vec![],
+                    status: ShotStatus::Draft,
+                });
+            }
+            Ok(())
+        })
+        .unwrap();
+    let shots = state.read(|p| p.shots.len()).unwrap_or(0);
+    ok("分镜", format!("{shots} 个镜头"));
+
+    /* ---------------------------------------------------------- 资产 */
+    let asset_id = new_id("ast");
+    let view_ids: Vec<String> = (0..2).map(|_| new_id("vw")).collect();
+    let aid = asset_id.clone();
+    let vids = view_ids.clone();
+    state
+        .mutate(|p| {
+            p.assets.push(Asset {
+                id: aid.clone(),
+                kind: AssetKind::Character,
+                name: "苏晚".into(),
+                aliases: vec!["晚晚".into()],
+                description: "二十出头的都市女性，酒红色长直发".into(),
+                tags: vec!["女主".into()],
+                locked_traits: vec!["锁骨处小痣".into()],
+                views: vec![
+                    AssetView {
+                        id: vids[0].clone(),
+                        kind: ViewKind::Front,
+                        label: "正面".into(),
+                        prompt: "正面全身站姿".into(),
+                        negative: String::new(),
+                        file: None,
+                        thumb: None,
+                        seed: Some(42),
+                        model: None,
+                        provider_id: None,
+                        status: AssetStatus::Planned,
+                        error: None,
+                        job_id: None,
+                        created_at: now_iso(),
+                    },
+                    AssetView {
+                        id: vids[1].clone(),
+                        kind: ViewKind::Side,
+                        label: "侧面".into(),
+                        prompt: "侧面全身站姿".into(),
+                        negative: String::new(),
+                        file: None,
+                        thumb: None,
+                        seed: None,
+                        model: None,
+                        provider_id: None,
+                        status: AssetStatus::Planned,
+                        error: None,
+                        job_id: None,
+                        created_at: now_iso(),
+                    },
+                ],
+                created_at: now_iso(),
+                updated_at: now_iso(),
+            });
+            Ok(())
+        })
+        .unwrap();
+
+    let composed = state
+        .read(|p| {
+            let a = p.assets[0].clone();
+            let v = a.views[0].clone();
+            actions::compose_image_prompt(p, &a, &v)
+        })
+        .unwrap();
+    ok("提示词拼装", composed);
+
+    /* ---------------------------------------------------------- 生图 */
+    match actions::generate_asset_views(&state, &asset_id, vec![], false) {
+        Ok(jobs) => {
+            let (done, failed) = wait_jobs(&state, Duration::from_secs(180)).await;
+            let files: Vec<String> = state
+                .read(|p| {
+                    p.assets
+                        .iter()
+                        .flat_map(|a| a.views.iter())
+                        .filter_map(|v| v.file.clone())
+                        .collect()
+                })
+                .unwrap_or_default();
+            let line = format!(
+                "提交 {} 个任务，完成 {done}，失败 {failed}，落盘 {} 个文件",
+                jobs.len(),
+                files.len()
+            );
+            if files.len() == jobs.len() && failed == 0 {
+                ok("生图", line);
+            } else {
+                fail("生图", line);
+            }
+        }
+        Err(e) => fail("生图", e),
+    }
+
+    /* -------------------------------------------------------- 提示词 */
+    state
+        .mutate(|p| {
+            let shots: Vec<Shot> = p.shots.clone();
+            for s in shots {
+                p.prompts.push(VideoPrompt {
+                    id: new_id("vp"),
+                    shot_id: s.id.clone(),
+                    index: s.index,
+                    prompt: format!(
+                        "{}，镜头{}，时长 {:.0} 秒",
+                        s.action, s.camera_move, s.duration_sec
+                    ),
+                    negative: p.style.spec.negative.clone(),
+                    motion: s.action.clone(),
+                    camera_move: s.camera_move.clone(),
+                    duration_sec: s.duration_sec,
+                    first_frame: Some(AssetRef {
+                        asset_id: asset_id.clone(),
+                        view_id: Some(view_ids[0].clone()),
+                    }),
+                    last_frame: None,
+                    refs: vec![],
+                    model_hint: None,
+                    seed: None,
+                    status: PromptStatus::Ready,
+                    updated_at: now_iso(),
+                });
+            }
+            Ok(())
+        })
+        .unwrap();
+    let pcount = state.read(|p| p.prompts.len()).unwrap_or(0);
+    ok("视频提示词", format!("{pcount} 条，已绑定首帧"));
+
+    /* -------------------------------------------------------- 生视频 */
+    let shot_ids: Vec<String> = state
+        .read(|p| p.shots.iter().map(|s| s.id.clone()).collect())
+        .unwrap();
+    match actions::generate_video_takes(&state, shot_ids, None, None) {
+        Ok(jobs) => {
+            let (done, failed) = wait_jobs(&state, Duration::from_secs(300)).await;
+            let takes = state.read(|p| p.takes.len()).unwrap_or(0);
+            let with_file = state
+                .read(|p| p.takes.iter().filter(|t| t.file.is_some()).count())
+                .unwrap_or(0);
+            let line = format!(
+                "提交 {}，完成 {done}，失败 {failed}，{takes} 条记录 / {with_file} 条有文件",
+                jobs.len()
+            );
+            if with_file == jobs.len() && failed == 0 {
+                ok("生视频", line);
+            } else {
+                fail("生视频", line);
+            }
+        }
+        Err(e) => fail("生视频", e),
+    }
+
+    /* ---------------------------------------------------------- 铺轨 */
+    match actions::build_timeline_from_takes(&state) {
+        Ok(n) => {
+            let (dur, clips) = state
+                .read(|p| {
+                    (
+                        p.timeline.duration_sec,
+                        p.timeline.tracks.iter().map(|t| t.clips.len()).sum::<usize>(),
+                    )
+                })
+                .unwrap();
+            ok(
+                "铺时间线",
+                format!("{n} 段，总时长 {dur:.1}s，轨道片段 {clips}"),
+            );
+        }
+        Err(e) => fail("铺时间线", e),
+    }
+
+    /* ---------------------------------------------------------- 导出 */
+    match actions::render_timeline_job(&state, false) {
+        Ok(_) => {
+            let (done, failed) = wait_jobs(&state, Duration::from_secs(300)).await;
+            let out: Vec<std::path::PathBuf> = state
+                .read(|p| {
+                    std::fs::read_dir(p.paths.render_dir())
+                        .ok()
+                        .map(|rd| {
+                            rd.filter_map(|x| x.ok())
+                                .map(|x| x.path())
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default()
+                })
+                .unwrap_or_default();
+            if let Some(f) = out.first() {
+                match media::probe(&state, f).await {
+                    Ok(info) => {
+                        let line = format!(
+                            "{} | {}x{} | {:.1}s | 音轨 {} | 完成 {done} 失败 {failed}",
+                            f.file_name().unwrap().to_string_lossy(),
+                            info.width,
+                            info.height,
+                            info.duration_sec,
+                            if info.has_audio { "有" } else { "无" }
+                        );
+                        if info.has_video && info.duration_sec > 0.5 {
+                            ok("导出成片", line);
+                        } else {
+                            fail("导出成片", line);
+                        }
+                    }
+                    Err(e) => fail("导出成片（探针）", e),
+                }
+            } else {
+                fail("导出成片", "没有产出文件");
+            }
+        }
+        Err(e) => fail("导出", e),
+    }
+
+    /* ------------------------------------------------------ 字幕能力 */
+    let caps = asr::capabilities(&state);
+    ok(
+        "字幕能力探测",
+        format!(
+            "{} / {} 线程 | GPU: {} | 推荐后端 {} | 内置 whisper {} | 外部 CLI {}",
+            caps.os,
+            caps.cpu_threads,
+            caps.nvidia_gpu.clone().unwrap_or_else(|| "无".into()),
+            caps.recommended_backend,
+            if caps.whisper_compiled { "是" } else { "否" },
+            caps.external_cli_path
+                .clone()
+                .unwrap_or_else(|| "未找到".into())
+        ),
+    );
+
+    // 真跑一次转写（拿导出的成片当输入）；环境不具备时给出明确原因
+    let media_file = state
+        .read(|p| {
+            std::fs::read_dir(p.paths.render_dir())
+                .ok()
+                .and_then(|rd| rd.filter_map(|x| x.ok()).map(|x| x.path()).next())
+        })
+        .ok()
+        .flatten();
+    if let Some(file) = media_file {
+        let job = state.jobs.create(JobKind::Asr, "自检转写", "测试");
+        let ctx = JobCtx {
+            id: job.id,
+            queue: state.jobs.clone(),
+        };
+        let opts = asr::TranscribeOptions {
+            file: file.to_string_lossy().to_string(),
+            language: "zh".into(),
+            model_id: "ggml-tiny".into(),
+            use_gpu: false,
+            threads: 2,
+            max_line_chars: 18,
+            name: "自检".into(),
+        };
+        match asr::transcribe(&state, &ctx, &opts).await {
+            Ok(doc) => ok("字幕转写", format!("{} 条字幕", doc.cues.len())),
+            Err(e) => println!("  [--] 字幕转写: 跳过（{e}）"),
+        }
+    }
+
+    /* ------------------------------------------------------ agent 往返 */
+    // 走一遍真实的 run_turn：流式事件、工具调用、工具执行、缓存前缀上报
+    {
+        use crate::agent::{AgentEvent, RunOptions};
+        use parking_lot::Mutex;
+        use tauri::ipc::{Channel, InvokeResponseBody};
+
+        let seen: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(vec![]));
+        let sink = seen.clone();
+        let channel = Channel::<AgentEvent>::new(move |body: InvokeResponseBody| {
+            if let InvokeResponseBody::Json(s) = body {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&s) {
+                    if let Some(t) = v.get("type").and_then(|x| x.as_str()) {
+                        sink.lock().push(t.to_string());
+                    }
+                }
+            }
+            Ok(())
+        });
+
+        match crate::agent::run_turn(
+            state.clone(),
+            channel,
+            RunOptions {
+                panel: PanelId::Checklist,
+                session_id: None,
+                input: "现在做到哪一步了？".into(),
+                image_paths: vec![],
+                refresh_context: false,
+            },
+        )
+        .await
+        {
+            Ok(sid) => {
+                let types = seen.lock().clone();
+                let expect = [
+                    "runStarted",
+                    "prefix",
+                    "usage",
+                    "toolCall",
+                    "toolResult",
+                    "runFinished",
+                ];
+                let missing: Vec<&str> = expect
+                    .iter()
+                    .copied()
+                    .filter(|k| !types.iter().any(|t| t == k))
+                    .collect();
+                let sess = state.session(&sid);
+                let line = format!(
+                    "{} 个事件，{} 条消息，前缀 {}",
+                    types.len(),
+                    sess.as_ref().map(|s| s.messages.len()).unwrap_or(0),
+                    sess.as_ref()
+                        .and_then(|s| s.prefix.as_ref())
+                        .map(|p| p.fingerprint.clone())
+                        .unwrap_or_default()
+                );
+                if missing.is_empty() {
+                    ok("agent 往返", line);
+                } else {
+                    fail("agent 往返", format!("缺少事件：{}", missing.join("、")))
+                }
+            }
+            Err(e) => fail("agent 往返", e),
+        }
+    }
+
+    /* -------------------------------------------------------- 完成度 */
+    let snap = state
+        .read(|p| {
+            let snap = checklist_ops::snapshot(p);
+            checklist_ops::with_auto(Arc::new(p.clone()), snap)
+        })
+        .unwrap();
+    println!("\n  面板完成度：");
+    for p in progress::all_progress(&snap) {
+        println!(
+            "    {:<10} {:>6.1}%  ({}/{})  {}",
+            p.panel.as_str(),
+            p.percent,
+            p.done,
+            p.total,
+            p.blockers.first().cloned().unwrap_or_default()
+        );
+    }
+    println!(
+        "\n  检查项：自动 {} 条，自定义 {} 条",
+        snap.checklist
+            .items
+            .iter()
+            .filter(|i| i.auto)
+            .count(),
+        snap.checklist
+            .items
+            .iter()
+            .filter(|i| !i.auto)
+            .count()
+    );
+
+    println!("\n  项目目录：{}\n", paths.root.display());
+    let failures = FAILURES.load(Ordering::SeqCst);
+    if failures == 0 {
+        println!("=== 自检全部通过 ===\n");
+    } else {
+        println!("=== 自检有 {failures} 项失败 ===\n");
+    }
+    failures as i32
+}

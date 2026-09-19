@@ -1,0 +1,235 @@
+:root {
+  --bg: #0f0f14;
+  --bg-1: #131319;
+  --bg-2: #16161d;
+  --bg-3: #1c1c24;
+  --line: #26262f;
+  --line-soft: #1f1f27;
+  --text: #e6e6ea;
+  --text-dim: #a0a0ad;
+  --text-faint: #6c6c7a;
+  --accent: #e8a33d;
+  --accent-soft: rgba(232, 163, 61, 0.14);
+  --ok: #4ea87a;
+  --warn: #d8a13a;
+  --err: #d9594c;
+  --info: #5b8dd9;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Microsoft YaHei", "Hiragino Sans GB", sans-serif;
+  font-size: 13px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #2e2e39;
+  border-radius: 5px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3d3d4a;
+}
+
+.mono {
+  font-family: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+}
+
+.dim {
+  color: var(--text-dim);
+}
+.faint {
+  color: var(--text-faint);
+}
+.tiny {
+  font-size: 11px;
+}
+.small {
+  font-size: 12px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.row-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.col {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.grow {
+  flex: 1;
+  min-width: 0;
+}
+.wrap {
+  flex-wrap: wrap;
+}
+
+.pane {
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+  height: 19px;
+  border-radius: 4px;
+  background: var(--bg-3);
+  color: var(--text-dim);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.tag.ok {
+  color: #8fd3ac;
+  background: rgba(78, 168, 122, 0.14);
+}
+.tag.warn {
+  color: #e6bd6a;
+  background: rgba(216, 161, 58, 0.14);
+}
+.tag.err {
+  color: #ec8b80;
+  background: rgba(217, 89, 76, 0.14);
+}
+.tag.accent {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.scroll {
+  overflow: auto;
+}
+
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  margin: 0;
+  font-weight: 600;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+/* 流式输出时的光标 */
+.caret::after {
+  content: "▍";
+  color: var(--accent);
+  animation: blink 1s steps(2) infinite;
+}
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+/* markdown 渲染 */
+.md {
+  word-break: break-word;
+}
+.md h1,
+.md h2,
+.md h3 {
+  margin: 10px 0 6px;
+  line-height: 1.35;
+}
+.md h1 {
+  font-size: 16px;
+}
+.md h2 {
+  font-size: 15px;
+}
+.md h3 {
+  font-size: 14px;
+}
+.md p {
+  margin: 6px 0;
+}
+.md ul,
+.md ol {
+  margin: 6px 0;
+  padding-left: 20px;
+}
+.md li {
+  margin: 2px 0;
+}
+.md code {
+  background: #22222b;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-family: "JetBrains Mono", Consolas, monospace;
+  font-size: 12px;
+}
+.md pre {
+  background: #16161d;
+  border: 1px solid var(--line);
+  padding: 10px;
+  border-radius: 6px;
+  overflow: auto;
+}
+.md pre code {
+  background: none;
+  padding: 0;
+}
+.md blockquote {
+  margin: 6px 0;
+  padding-left: 10px;
+  border-left: 2px solid var(--line);
+  color: var(--text-dim);
+}
+.md table {
+  border-collapse: collapse;
+  margin: 8px 0;
+}
+.md th,
+.md td {
+  border: 1px solid var(--line);
+  padding: 4px 8px;
+}
+.md hr {
+  border: none;
+  border-top: 1px solid var(--line);
+  margin: 10px 0;
+}

@@ -1,0 +1,23 @@
+node_modules/
+dist/
+dist-ssr/
+*.local
+.DS_Store
+.vite/
+
+# Rust / Tauri
+src-tauri/target/
+src-tauri/gen/
+
+# 内置二进制 sidecar（体积大，不入库）
+src-tauri/binaries/*.exe
+src-tauri/binaries/ffmpeg
+src-tauri/binaries/ffprobe
+src-tauri/binaries/whisper-cli
+
+# 打包出来的绿色版目录（体积大，由 npm run pack 生成）
+app/
+
+# 本地样例项目与临时产物
+_samples/
+*.tmp
