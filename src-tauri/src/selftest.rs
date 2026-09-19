@@ -249,7 +249,7 @@ pub async fn run_pipeline_check() -> i32 {
         active_llm_provider_id: Some("mock-llm".into()),
         active_image_provider_id: Some("mock-image".into()),
         active_video_provider_id: Some("mock-video".into()),
-        confirm_costly_tools: false,
+        agent_mode: "auto".into(),
         ..Default::default()
     };
     state.save_settings(&settings).unwrap();

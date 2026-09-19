@@ -7,14 +7,14 @@
 import { defineStore } from "pinia";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { api, errorText } from "@/api/ipc";
-import { message } from "@/utils/notify";
+import { message } from "@/ui";
 import type { AgentEvent, AgentSession, AgentToolCall, PrefixReport, UsageReport } from "@/types/agent";
 import type { PanelId } from "@/types/models";
 
 interface State {
   sessions: AgentSession[];
-  /** 每个面板记住自己当前选中的会话 */
-  activeByPanel: Partial<Record<PanelId, string>>;
+  /** Simon 是共享上下文的助手：全局只有一个当前会话，不按面板分 */
+  activeSessionId: string | null;
   running: boolean;
   streamText: string;
   streamReasoning: string;
@@ -22,6 +22,8 @@ interface State {
   prefix: PrefixReport | null;
   usage: UsageReport | null;
   pending: { id: string; title: string } | null;
+  /** agent 正在等用户回答的问题 */
+  pendingAsk: { id: string; question: string; options: string[]; why: string } | null;
   lastError: string | null;
   /** 上一次请求的前缀指纹，用来提示「前缀已变，缓存会失效」 */
   lastSentContext: Partial<Record<PanelId, string>>;
@@ -30,7 +32,7 @@ interface State {
 export const useAgentStore = defineStore("agent", {
   state: (): State => ({
     sessions: [],
-    activeByPanel: {},
+    activeSessionId: null,
     running: false,
     streamText: "",
     streamReasoning: "",
@@ -38,20 +40,14 @@ export const useAgentStore = defineStore("agent", {
     prefix: null,
     usage: null,
     pending: null,
+    pendingAsk: null,
     lastError: null,
     lastSentContext: {},
   }),
 
   getters: {
-    current: (s): AgentSession | null => {
-      const id = Object.values(s.activeByPanel).find(Boolean);
-      return s.sessions.find((x) => x.id === id) ?? null;
-    },
-    sessionOf: (s) => (panel: PanelId): AgentSession | null => {
-      const id = s.activeByPanel[panel];
-      return s.sessions.find((x) => x.id === id) ?? null;
-    },
-    sessionsOf: (s) => (panel: PanelId) => s.sessions.filter((x) => x.panel === panel),
+    current: (s): AgentSession | null =>
+      s.sessions.find((x) => x.id === s.activeSessionId) ?? null,
     cacheHint(s): string {
       if (!s.usage) return "尚无用量数据";
       const r = (s.usage.hitRate * 100).toFixed(1);
@@ -63,31 +59,28 @@ export const useAgentStore = defineStore("agent", {
     async loadSessions() {
       try {
         this.sessions = await api.agentSessions();
-        for (const s of this.sessions) {
-          if (!this.activeByPanel[s.panel]) this.activeByPanel[s.panel] = s.id;
+        if (!this.activeSessionId && this.sessions.length) {
+          this.activeSessionId = this.sessions[this.sessions.length - 1].id;
         }
       } catch {
         this.sessions = [];
       }
     },
 
-    sessionIdFor(panel: PanelId): string | undefined {
-      return this.activeByPanel[panel];
-    },
-
     async ensureSession(panel: PanelId): Promise<string> {
-      const existing = this.activeByPanel[panel];
-      if (existing && this.sessions.some((s) => s.id === existing)) return existing;
+      if (this.activeSessionId && this.sessions.some((s) => s.id === this.activeSessionId)) {
+        return this.activeSessionId;
+      }
       const s = await api.agentSessionNew(panel);
       this.sessions.push(s);
-      this.activeByPanel[panel] = s.id;
+      this.activeSessionId = s.id;
       return s.id;
     },
 
     async newSession(panel: PanelId) {
       const s = await api.agentSessionNew(panel);
       this.sessions.push(s);
-      this.activeByPanel[panel] = s.id;
+      this.activeSessionId = s.id;
       this.streamText = "";
       this.streamReasoning = "";
       this.streamTools = [];
@@ -96,8 +89,8 @@ export const useAgentStore = defineStore("agent", {
       return s;
     },
 
-    selectSession(panel: PanelId, id: string) {
-      this.activeByPanel[panel] = id;
+    selectSession(_panel: PanelId, id: string) {
+      this.activeSessionId = id;
       this.streamText = "";
       this.streamReasoning = "";
       this.streamTools = [];
@@ -108,8 +101,8 @@ export const useAgentStore = defineStore("agent", {
     async deleteSession(id: string) {
       await api.agentSessionDelete(id);
       this.sessions = this.sessions.filter((s) => s.id !== id);
-      for (const [panel, sid] of Object.entries(this.activeByPanel)) {
-        if (sid === id) delete this.activeByPanel[panel as PanelId];
+      if (this.activeSessionId === id) {
+        this.activeSessionId = this.sessions[this.sessions.length - 1]?.id ?? null;
       }
     },
 
@@ -123,7 +116,7 @@ export const useAgentStore = defineStore("agent", {
 
     async previewPrefix(panel: PanelId) {
       try {
-        this.prefix = await api.agentPrefixPreview(panel, this.activeByPanel[panel]);
+        this.prefix = await api.agentPrefixPreview(panel, this.activeSessionId ?? undefined);
       } catch {
         /* 没有项目时忽略 */
       }
@@ -144,6 +137,7 @@ export const useAgentStore = defineStore("agent", {
       this.streamTools = [];
       this.lastError = null;
       this.pending = null;
+      this.pendingAsk = null;
 
       const channel = new Channel<AgentEvent>();
       channel.onmessage = (ev: AgentEvent) => this.handleEvent(ev, sessionId);
@@ -164,6 +158,7 @@ export const useAgentStore = defineStore("agent", {
       } finally {
         this.running = false;
         this.pending = null;
+        this.pendingAsk = null;
         await this.refreshSession(sessionId);
         await this.loadSessions();
       }
@@ -190,6 +185,7 @@ export const useAgentStore = defineStore("agent", {
             title: ev.title,
             input: ev.input,
             costly: ev.costly,
+            mutates: ev.mutates,
             state: ev.needsConfirm ? "awaiting-approval" : "running",
           });
           if (ev.needsConfirm) {
@@ -207,6 +203,14 @@ export const useAgentStore = defineStore("agent", {
           if (this.pending?.id === ev.id) this.pending = null;
           break;
         }
+        case "askUser":
+          this.pendingAsk = {
+            id: ev.id,
+            question: ev.question,
+            options: ev.options ?? [],
+            why: ev.why ?? "",
+          };
+          break;
         case "usage":
           this.usage = ev.report;
           break;
@@ -222,6 +226,11 @@ export const useAgentStore = defineStore("agent", {
           break;
       }
       void sessionId;
+    },
+
+    async answer(toolCallId: string, text: string) {
+      await api.agentAnswer(toolCallId, text);
+      this.pendingAsk = null;
     },
 
     async approve(toolCallId: string, approved: boolean) {

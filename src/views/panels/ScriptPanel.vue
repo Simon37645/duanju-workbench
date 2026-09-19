@@ -1,39 +1,51 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
-import { NButton, NInput, NInputNumber, NSelect, NPopover, NModal, useDialog } from "naive-ui";
+import { Eye, Hash, Lock, Pencil, Plus, Trash2, Wand2 } from "@lucide/vue";
 import { useProjectStore } from "@/stores/project";
+import { useAgentStore } from "@/stores/agent";
 import { api, errorText } from "@/api/ipc";
-import { message } from "@/utils/notify";
+import { toast, confirmDialog } from "@/ui";
+import UiButton from "@/ui/Button.vue";
+import UiBadge from "@/ui/Badge.vue";
+import UiInput from "@/ui/Input.vue";
+import UiTextarea from "@/ui/Textarea.vue";
+import UiSelect from "@/ui/Select.vue";
+import UiSegmented from "@/ui/Segmented.vue";
+import UiEmpty from "@/ui/Empty.vue";
+import UiTooltip from "@/ui/Tooltip.vue";
+import UiModal from "@/ui/Modal.vue";
+import UiNumber from "@/ui/NumberInput.vue";
 import Markdown from "@/components/Markdown.vue";
 import type { ChapterStatus } from "@/types/models";
 
 const project = useProjectStore();
-const dialog = useDialog();
+const agent = useAgentStore();
 
 const currentId = ref<string | null>(null);
 const content = ref("");
 const title = ref("");
 const summary = ref("");
-const preview = ref(false);
 const dirty = ref(false);
+const mode = ref("edit");
 const showCount = ref(false);
 const wantCount = ref(6);
 
 const chapters = computed(() => project.chapters);
 const current = computed(() => chapters.value.find((c) => c.id === currentId.value) ?? null);
 
-const statusLabel: Record<ChapterStatus, string> = {
-  empty: "空",
-  draft: "草稿",
-  written: "已写",
-  locked: "锁定",
+const STATUS: Record<ChapterStatus, { label: string; tone: "neutral" | "warn" | "ok" | "accent" }> = {
+  empty: { label: "空", tone: "neutral" },
+  draft: { label: "草稿", tone: "warn" },
+  written: { label: "已写", tone: "ok" },
+  locked: { label: "锁定", tone: "accent" },
 };
-const statusClass: Record<ChapterStatus, string> = {
-  empty: "",
-  draft: "warn",
-  written: "ok",
-  locked: "accent",
-};
+
+const statusOptions = (Object.keys(STATUS) as ChapterStatus[]).map((k) => ({
+  label: STATUS[k].label,
+  value: k,
+}));
+
+const wordCount = computed(() => content.value.replace(/\s/g, "").length);
 
 onMounted(async () => {
   if (chapters.value.length) await select(chapters.value[0].id);
@@ -62,9 +74,9 @@ async function save() {
     await project.saveChapter(currentId.value, content.value);
     await project.updateChapterMeta(currentId.value, { title: title.value, summary: summary.value });
     dirty.value = false;
-    message.success("已保存");
+    toast.ok("已保存");
   } catch (e) {
-    message.error(`保存失败：${errorText(e)}`);
+    toast.err(`保存失败：${errorText(e)}`);
   }
 }
 
@@ -73,35 +85,21 @@ async function addChapter() {
   await select(meta.id);
 }
 
-function removeChapter(id: string) {
+async function removeChapter(id: string) {
   const ch = chapters.value.find((c) => c.id === id);
-  dialog.warning({
+  const ok = await confirmDialog({
     title: "删除章节",
-    content: `确定删除「${ch?.title}」？该章的分镜与提示词也会一并删除，正文文件会被移除。`,
+    content: `确定删除「${ch?.title}」？该章的分镜与提示词会一并删除，正文文件也会移除。`,
     positiveText: "删除",
-    negativeText: "取消",
-    onPositiveClick: async () => {
-      await project.deleteChapter(id);
-      if (currentId.value === id) {
-        currentId.value = null;
-        content.value = "";
-        if (chapters.value.length) await select(chapters.value[0].id);
-      }
-      message.success("已删除");
-    },
+    danger: true,
   });
-}
-
-async function applyCount() {
-  const want = Math.max(1, wantCount.value);
-  const have = chapters.value.length;
-  if (want > have) {
-    for (let i = have; i < want; i++) await project.addChapter();
-    message.success(`已追加 ${want - have} 章`);
-  } else if (want < have) {
-    message.warning(`当前已有 ${have} 章，减少章节请手动删除，避免误删正文`);
+  if (!ok) return;
+  await project.deleteChapter(id);
+  if (currentId.value === id) {
+    currentId.value = null;
+    content.value = "";
+    if (chapters.value.length) await select(chapters.value[0].id);
   }
-  showCount.value = false;
 }
 
 async function move(id: string, dir: -1 | 1) {
@@ -113,206 +111,280 @@ async function move(id: string, dir: -1 | 1) {
   await api.scriptReorderChapters(ids);
   await project.reload();
 }
+
+async function applyCount() {
+  const want = Math.max(1, wantCount.value);
+  const have = chapters.value.length;
+  if (want > have) {
+    for (let i = have; i < want; i++) await project.addChapter();
+    toast.ok(`已追加 ${want - have} 章`);
+  } else if (want < have) {
+    toast.warn(`当前已有 ${have} 章，减少请手动删除，避免误删正文`);
+  }
+  showCount.value = false;
+}
+
+function askAgent() {
+  agent.send(
+    "script",
+    currentId.value
+      ? `帮我把「${current.value?.title}」这一章写完整，保持短剧节奏。`
+      : "帮我按 4 章拆分故事大纲。",
+  );
+}
 </script>
 
 <template>
-  <div class="wrap2">
-    <div class="pane col-list">
-      <div class="row-between head">
-        <span style="font-weight: 600">章节（{{ chapters.length }}）</span>
-        <div class="row" style="gap: 2px">
-          <n-button size="tiny" quaternary @click="showCount = true">设定章数</n-button>
-          <n-button size="tiny" quaternary @click="addChapter">＋</n-button>
+  <div class="layout">
+    <!-- 章节列表 -->
+    <section class="panel list-panel">
+      <header class="panel-head">
+        <div class="row" style="gap: 6px">
+          <span class="section-label">章节</span>
+          <UiBadge tone="neutral" size="xs">{{ chapters.length }}</UiBadge>
         </div>
-      </div>
-      <div class="scroll list">
+        <div class="row" style="gap: 2px">
+          <UiTooltip content="按数量补齐章节">
+            <UiButton variant="subtle" size="xs" icon @click="showCount = true">
+              <template #icon><Hash :size="13" /></template>
+            </UiButton>
+          </UiTooltip>
+          <UiTooltip content="新增一章">
+            <UiButton variant="subtle" size="xs" icon @click="addChapter">
+              <template #icon><Plus :size="13" /></template>
+            </UiButton>
+          </UiTooltip>
+        </div>
+      </header>
+
+      <div class="list scroll">
         <div
           v-for="c in chapters"
           :key="c.id"
           class="chap"
-          :class="{ active: c.id === currentId }"
+          :class="{ on: c.id === currentId }"
           @click="select(c.id)"
         >
           <div class="row-between">
-            <div class="row" style="gap: 6px; min-width: 0">
-              <span class="idx mono">{{ c.index }}</span>
-              <span class="truncate" style="font-weight: 500">{{ c.title }}</span>
+            <div class="row" style="gap: 7px; min-width: 0">
+              <span class="idx num">{{ c.index }}</span>
+              <span class="ctitle truncate">{{ c.title }}</span>
             </div>
-            <span class="tag" :class="statusClass[c.status]">{{ statusLabel[c.status] }}</span>
+            <UiBadge :tone="STATUS[c.status].tone" size="xs">{{ STATUS[c.status].label }}</UiBadge>
           </div>
-          <div class="tiny faint truncate" style="margin-left: 24px">{{ c.summary || "（无大纲）" }}</div>
-          <div class="row-between" style="margin-left: 24px; margin-top: 2px">
-            <span class="tiny faint">{{ c.wordCount }} 字</span>
-            <div class="row" style="gap: 0">
-              <button class="mini" @click.stop="move(c.id, -1)">↑</button>
-              <button class="mini" @click.stop="move(c.id, 1)">↓</button>
-              <button class="mini" @click.stop="removeChapter(c.id)">×</button>
+          <div class="csum t-xs faint truncate">{{ c.summary || "（无大纲）" }}</div>
+          <div class="row-between">
+            <span class="t-xs faint num">{{ c.wordCount }} 字</span>
+            <div class="ops">
+              <button class="op" @click.stop="move(c.id, -1)">↑</button>
+              <button class="op" @click.stop="move(c.id, 1)">↓</button>
+              <button class="op danger" @click.stop="removeChapter(c.id)"><Trash2 :size="11" /></button>
             </div>
           </div>
         </div>
-        <div v-if="!chapters.length" class="tiny faint" style="padding: 16px; text-align: center">
-          还没有章节。<br />点右上「设定章数」，或直接让右侧 agent 生成章节骨架。
-        </div>
-      </div>
-    </div>
 
-    <div class="pane col-edit">
-      <template v-if="current">
-        <div class="row head" style="gap: 8px">
-          <n-input
-            v-model:value="title"
-            size="small"
+        <UiEmpty
+          v-if="!chapters.length"
+          compact
+          title="还没有章节"
+          hint="点右上角补齐，或直接让右侧 agent 生成章节骨架"
+        />
+      </div>
+    </section>
+
+    <!-- 编辑区 -->
+    <section v-if="current" class="panel edit-panel">
+      <header class="panel-head">
+        <div class="row grow" style="gap: 8px; min-width: 0">
+          <UiInput
+            v-model="title"
             placeholder="章节标题"
-            style="max-width: 260px"
-            @update:value="dirty = true"
+            class="title-input"
+            @update:model-value="dirty = true"
           />
-          <n-select
-            size="small"
-            style="width: 108px"
-            :value="current.status"
-            :options="[
-              { label: '空', value: 'empty' },
-              { label: '草稿', value: 'draft' },
-              { label: '已写', value: 'written' },
-              { label: '锁定', value: 'locked' },
+          <UiSelect
+            :model-value="current.status"
+            :options="statusOptions"
+            style="width: 96px"
+            @update:model-value="(v: string | null) => project.updateChapterMeta(current!.id, { status: v as ChapterStatus })"
+          />
+          <UiBadge v-if="current.status === 'locked'" tone="accent" size="xs">
+            <Lock :size="9" /> 锁定
+          </UiBadge>
+        </div>
+        <div class="row" style="gap: 8px">
+          <span class="t-xs faint num">{{ wordCount }} 字</span>
+          <UiSegmented
+            v-model="mode"
+            size="xs"
+            :items="[
+              { label: '编辑', value: 'edit', icon: Pencil },
+              { label: '预览', value: 'preview', icon: Eye },
             ]"
-            @update:value="(v: ChapterStatus) => project.updateChapterMeta(current!.id, { status: v })"
           />
-          <div class="grow" />
-          <span class="tiny faint">{{ content.length }} 字</span>
-          <n-button size="tiny" quaternary @click="preview = !preview">
-            {{ preview ? "编辑" : "预览" }}
-          </n-button>
-          <n-button size="tiny" type="primary" :disabled="!dirty" @click="save">
+          <UiButton variant="primary" size="sm" :disabled="!dirty" @click="save">
             {{ dirty ? "保存" : "已保存" }}
-          </n-button>
+          </UiButton>
         </div>
+      </header>
 
-        <div class="col grow" style="min-height: 0; padding: 10px 12px">
-          <n-input
-            v-model:value="summary"
-            size="small"
-            type="textarea"
-            :autosize="{ minRows: 2, maxRows: 4 }"
-            placeholder="本章大纲（会喂给分镜与资产面板，写清出场人物与关键道具）"
-            @update:value="dirty = true"
-          />
-          <Markdown v-if="preview" :text="content" class="editor md-preview scroll" />
-          <n-input
-            v-else
-            v-model:value="content"
-            type="textarea"
-            class="editor"
-            placeholder="章节正文（Markdown）。短剧节奏：开场抓人、中间反转、结尾留钩子。"
-            @update:value="dirty = true"
-            @keydown.ctrl.s.prevent="save"
-            @keydown.meta.s.prevent="save"
-          />
-        </div>
-      </template>
-      <div v-else class="empty">
-        <div class="tiny faint">从左侧选一章，或新建一章开始写</div>
+      <div class="edit-body">
+        <UiTextarea
+          v-model="summary"
+          :rows="2"
+          placeholder="本章大纲 —— 会喂给分镜与资产面板，写清出场人物与关键道具"
+          @update:model-value="dirty = true"
+          @blur="save"
+        />
+        <Markdown v-if="mode === 'preview'" :text="content || '*（还没有正文）*'" class="preview scroll" />
+        <UiTextarea
+          v-else
+          v-model="content"
+          class="editor"
+          placeholder="章节正文。短剧节奏：开场 3 秒抓人，中间有小反转，结尾留钩子。"
+          @update:model-value="dirty = true"
+          @keydown="(e: KeyboardEvent) => { if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); save(); } }"
+        />
       </div>
-    </div>
+    </section>
 
-    <n-modal v-model:show="showCount" preset="dialog" title="设定章节数" style="width: 380px">
-      <div class="col" style="gap: 10px">
-        <div class="tiny dim">当前 {{ chapters.length }} 章。增加会追加空白章节，减少请手动删除。</div>
-        <n-input-number v-model:value="wantCount" :min="1" :max="200" />
+    <section v-else class="panel edit-panel">
+      <UiEmpty title="选择一章开始写" hint="左侧选一章，或者新建一章">
+        <template #icon><Pencil :size="26" /></template>
+        <UiButton variant="outline" size="sm" @click="askAgent">
+          <template #icon><Wand2 :size="13" /></template>
+          让 agent 生成大纲
+        </UiButton>
+      </UiEmpty>
+    </section>
+
+    <UiModal :show="showCount" title="设定章节数" :width="400" @update:show="(v: boolean) => (showCount = v)">
+      <div class="col" style="gap: 12px">
+        <p class="t-sm dim">当前 {{ chapters.length }} 章。增加会追加空白章节，减少请手动删除。</p>
+        <UiNumber v-model="wantCount" :min="1" :max="200" />
       </div>
-      <template #action>
-        <n-button size="small" @click="showCount = false">取消</n-button>
-        <n-button size="small" type="primary" @click="applyCount">确定</n-button>
+      <template #footer>
+        <UiButton variant="ghost" @click="showCount = false">取消</UiButton>
+        <UiButton variant="primary" @click="applyCount">确定</UiButton>
       </template>
-    </n-modal>
+    </UiModal>
   </div>
 </template>
 
 <style scoped>
-.wrap2 {
+.layout {
   display: flex;
-  gap: 12px;
+  gap: var(--sp-3);
   height: 100%;
   min-height: 0;
 }
-.col-list {
-  width: 300px;
-  flex: 0 0 300px;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  overflow: hidden;
+.list-panel {
+  width: 272px;
+  flex: 0 0 272px;
 }
-.col-edit {
+.edit-panel {
   flex: 1;
   min-width: 0;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  overflow: hidden;
 }
-.head {
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--line-soft);
-  flex: 0 0 auto;
-}
+
 .list {
   flex: 1;
   min-height: 0;
-  padding: 6px;
+  padding: var(--sp-2);
 }
 .chap {
-  padding: 7px 8px;
-  border-radius: 6px;
+  padding: 7px 9px;
+  border-radius: var(--r);
   cursor: pointer;
-  border-left: 2px solid transparent;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  border: 1px solid transparent;
+  transition: background var(--fast), border-color var(--fast);
 }
 .chap:hover {
-  background: var(--bg-3);
+  background: var(--surface-3);
 }
-.chap.active {
-  background: var(--accent-soft);
-  border-left-color: var(--accent);
+.chap.on {
+  background: var(--surface-3);
+  border-color: var(--line-strong);
 }
 .idx {
-  width: 16px;
+  width: 18px;
+  flex: 0 0 auto;
+  font-size: var(--t-xs);
+  color: var(--fg-ghost);
   text-align: right;
-  color: var(--text-faint);
-  font-size: 11px;
 }
-.mini {
+.ctitle {
+  font-size: var(--t-base);
+  font-weight: 500;
+}
+.csum {
+  padding-left: 25px;
+  margin-top: -2px;
+}
+.chap .row-between:last-child {
+  padding-left: 25px;
+  height: 16px;
+}
+.ops {
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity var(--fast);
+}
+.chap:hover .ops {
+  opacity: 1;
+}
+.op {
   background: none;
   border: none;
-  color: var(--text-faint);
+  color: var(--fg-ghost);
   cursor: pointer;
   font-size: 11px;
   padding: 0 3px;
+  border-radius: var(--r-xs);
+  line-height: 1;
 }
-.mini:hover {
-  color: var(--text);
+.op:hover {
+  color: var(--fg);
+  background: var(--surface-4);
+}
+.op.danger:hover {
+  color: var(--err);
+}
+
+.title-input {
+  flex: 1 1 180px;
+  min-width: 140px;
+  max-width: 320px;
+}
+
+.edit-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
 }
 .editor {
   flex: 1;
   min-height: 0;
+  font-size: var(--t-md);
+  line-height: 1.9;
 }
 .editor :deep(textarea) {
-  height: 100% !important;
-  font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
-  line-height: 1.9;
-  font-size: 13.5px;
+  height: 100%;
 }
-.md-preview {
+.preview {
   flex: 1;
   min-height: 0;
-  overflow: auto;
-  background: var(--bg-1);
+  background: var(--surface-3);
   border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 14px 18px;
-}
-.empty {
-  flex: 1;
-  display: grid;
-  place-items: center;
+  border-radius: var(--r);
+  padding: var(--sp-4) var(--sp-5);
+  font-size: var(--t-md);
 }
 </style>

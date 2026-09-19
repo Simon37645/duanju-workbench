@@ -5,6 +5,16 @@
 前端是纯展示 + 交互，所有状态与业务逻辑在后端；命令层与 agent 工具层共用同一套
 `actions`，保证「用户手点」和「agent 自动做」产生完全一样的副作用。
 
+### 前端分层
+
+```
+src/ui/            自研设计系统（tokens.css + base.css + 20 个组件）
+src/dev/mock.ts    浏览器预览用的假后端（不在 Tauri 里时自动启用）
+src/stores/        Pinia：项目 / agent / 任务 / 设置
+src/components/    外壳：侧栏、顶栏、agent 对话坞、任务条、设置抽屉
+src/views/panels/  九个面板
+```
+
 ```
 ┌──────────────────────────── Vue 前端 ────────────────────────────┐
 │  HomeView（项目列表/新建/打开）                                     │

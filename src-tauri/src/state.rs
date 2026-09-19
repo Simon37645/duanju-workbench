@@ -20,8 +20,10 @@ pub const EVENT_PROJECT_CHANGED: &str = "project://changed";
 pub struct AgentRuntime {
     /// sessionId -> 会话
     pub sessions: RwLock<HashMap<String, AgentSession>>,
-    /// toolCallId -> 等待用户确认的通道
+    /// toolCallId -> 等待用户确认（花钱操作）的通道
     pub approvals: Mutex<HashMap<String, oneshot::Sender<bool>>>,
+    /// toolCallId -> 等待用户回答提问的通道
+    pub answers: Mutex<HashMap<String, oneshot::Sender<String>>>,
     pub running: RwLock<HashSet<String>>,
 }
 

@@ -439,8 +439,13 @@ export interface AppSettings {
   workspacePanelWidth: number;
   agentDockWidth: number;
   agentDockOpen: boolean;
-  /** 生图/生视频这类花钱的 agent 工具是否需要人工确认 */
-  confirmCostlyTools: boolean;
+  /**
+   * agent 权限模式：
+   * - yolo    任何操作都直接执行
+   * - auto    自动改数据，只有花钱的生成操作要确认（默认）
+   * - confirm 任何会改数据的操作都先确认
+   */
+  agentMode: "yolo" | "auto" | "confirm";
   maxToolRounds: number;
   /** 代理模式：auto 跟随系统/环境变量 / off 直连 / manual 手动填 */
   proxyMode: "auto" | "off" | "manual";

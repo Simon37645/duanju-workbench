@@ -907,6 +907,15 @@ pub async fn agent_run(
 }
 
 #[tauri::command]
+pub async fn agent_answer(
+    state: State<'_, AppState>,
+    tool_call_id: String,
+    answer: String,
+) -> Result<bool> {
+    Ok(agent::resolve_answer(&state, &tool_call_id, &answer))
+}
+
+#[tauri::command]
 pub async fn agent_approve(
     state: State<'_, AppState>,
     tool_call_id: String,

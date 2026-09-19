@@ -667,13 +667,17 @@ pub const DEFAULT_WHISPER_BASE_URL: &str =
     "https://huggingface.co/ggerganov/whisper.cpp/resolve/main";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", default)]
 pub struct AppSettings {
     pub theme: String,
     pub workspace_panel_width: u32,
     pub agent_dock_width: u32,
     pub agent_dock_open: bool,
-    pub confirm_costly_tools: bool,
+    /// agent 权限模式：
+    /// - yolo    任何操作都直接执行
+    /// - auto    自动改数据，只有花钱的生成操作要确认（默认）
+    /// - confirm 任何会改数据的操作都先确认
+    pub agent_mode: String,
     pub max_tool_rounds: u32,
     pub asr_backend: String,
     pub asr_use_gpu: bool,
@@ -705,7 +709,7 @@ impl Default for AppSettings {
             workspace_panel_width: 260,
             agent_dock_width: 420,
             agent_dock_open: true,
-            confirm_costly_tools: true,
+            agent_mode: "auto".into(),
             max_tool_rounds: 12,
             asr_backend: "auto".into(),
             asr_use_gpu: true,

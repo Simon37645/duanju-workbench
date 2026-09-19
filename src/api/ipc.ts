@@ -2,7 +2,20 @@
  * Tauri 命令封装。前端不直接 invoke，统一走这里，方便类型检查和后续替换实现。
  * 命令名与 src-tauri/src/lib.rs 的 generate_handler! 一一对应。
  */
-import { invoke } from "@tauri-apps/api/core";
+import { invoke as tauriInvoke } from "@tauri-apps/api/core";
+
+/**
+ * 在浏览器里跑 `npm run dev` 时没有 Tauri 运行时，这里自动切到假后端（src/dev/mock.ts），
+ * 方便调界面与截图。打包成桌面应用时走真正的 invoke，mock 也不会被打进主包。
+ */
+let mockModule: typeof import("@/dev/mock") | null = null;
+async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+  if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
+    return tauriInvoke<T>(cmd, args);
+  }
+  mockModule ??= await import("@/dev/mock");
+  return mockModule.mockInvoke(cmd, args) as Promise<T>;
+}
 import type {
   AppSettings,
   AsrCapabilities,
@@ -208,6 +221,8 @@ export const api = {
     invoke<import("@/types/agent").AgentSession>("agent_session_new", { panel }),
   agentApprove: (toolCallId: string, approved: boolean) =>
     invoke<boolean>("agent_approve", { toolCallId, approved }),
+  agentAnswer: (toolCallId: string, answer: string) =>
+    invoke<boolean>("agent_answer", { toolCallId, answer }),
   agentPrefixPreview: (panel: PanelId, sessionId?: string) =>
     invoke<import("@/types/agent").PrefixReport>("agent_prefix_preview", {
       panel,

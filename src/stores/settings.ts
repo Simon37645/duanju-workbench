@@ -1,7 +1,7 @@
 import { defineStore } from "pinia";
 import { api, errorText } from "@/api/ipc";
 import type { AppSettings, ProviderConfig, ProviderKind } from "@/types/models";
-import { message } from "@/utils/notify";
+import { message } from "@/ui";
 
 interface State {
   settings: AppSettings | null;

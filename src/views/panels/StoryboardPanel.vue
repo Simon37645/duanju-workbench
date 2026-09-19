@@ -1,358 +1,386 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { NButton, NInput, NSelect, NInputNumber, NSwitch, NPopover, useDialog } from "naive-ui";
+import { Clock, Film, Plus, Sparkles, Trash2, Wand2 } from "@lucide/vue";
 import { useProjectStore } from "@/stores/project";
+import { useAgentStore } from "@/stores/agent";
 import { api, errorText } from "@/api/ipc";
-import { message } from "@/utils/notify";
+import { toast, confirmDialog } from "@/ui";
+import UiButton from "@/ui/Button.vue";
+import UiBadge from "@/ui/Badge.vue";
+import UiInput from "@/ui/Input.vue";
+import UiNumber from "@/ui/NumberInput.vue";
+import UiTextarea from "@/ui/Textarea.vue";
+import UiSelect from "@/ui/Select.vue";
+import UiField from "@/ui/Field.vue";
+import UiSwitch from "@/ui/Switch.vue";
+import UiEmpty from "@/ui/Empty.vue";
+import UiSegmented from "@/ui/Segmented.vue";
 import type { Shot, ShotStatus } from "@/types/models";
 
 const project = useProjectStore();
-const dialog = useDialog();
+const agent = useAgentStore();
 
-const chapterId = ref<string>("");
-const vocab = ref({ shotSizes: [] as string[], cameraMoves: [] as string[], timeOfDay: [] as string[] });
+const chapterId = ref("");
 const editing = ref<Shot | null>(null);
+const statusFilter = ref("all");
+const vocab = ref<{ shotSizes: string[]; cameraMoves: string[]; timeOfDay: string[] }>({
+  shotSizes: [], cameraMoves: [], timeOfDay: [],
+});
 
 const chapters = computed(() => project.chapters);
-const shots = computed(() =>
+const allShots = computed(() =>
   project.shots
     .filter((s) => s.chapterId === chapterId.value)
     .slice()
     .sort((a, b) => a.index - b.index),
 );
-const totalDuration = computed(() => shots.value.reduce((a, s) => a + (s.durationSec || 0), 0));
+const shots = computed(() =>
+  statusFilter.value === "all" ? allShots.value : allShots.value.filter((s) => s.status === statusFilter.value),
+);
+const total = computed(() => allShots.value.reduce((a, s) => a + (s.durationSec || 0), 0));
 
-const statusOptions: { label: string; value: ShotStatus }[] = [
-  { label: "草稿", value: "draft" },
-  { label: "就绪", value: "ready" },
-  { label: "已写提示词", value: "prompted" },
-  { label: "已出片", value: "generated" },
-  { label: "锁定", value: "locked" },
-];
+const STATUS: Record<ShotStatus, { label: string; tone: "neutral" | "warn" | "ok" | "accent" | "info" }> = {
+  draft: { label: "草稿", tone: "neutral" },
+  ready: { label: "就绪", tone: "info" },
+  prompted: { label: "有提示词", tone: "warn" },
+  generated: { label: "已出片", tone: "ok" },
+  locked: { label: "锁定", tone: "accent" },
+};
+const statusOptions = (Object.keys(STATUS) as ShotStatus[]).map((k) => ({ label: STATUS[k].label, value: k }));
 
 onMounted(async () => {
   vocab.value = await api.storyboardVocab();
+  await project.ensure();
   if (chapters.value.length) chapterId.value = chapters.value[0].id;
+  const first = allShots.value[0];
+  if (first) edit(first);
 });
 
-function emptyShot(): Shot {
+function blank(): Shot {
   return {
-    id: "",
-    chapterId: chapterId.value,
-    index: shots.value.length + 1,
-    sceneId: null,
-    location: "",
-    timeOfDay: "",
-    interior: false,
-    shotSize: "中景",
-    camera: "",
-    cameraMove: "固定",
-    durationSec: 3,
-    characters: [],
-    props: [],
-    action: "",
-    dialogue: "",
-    narration: "",
-    sfx: "",
-    bgm: "",
-    imagePrompt: "",
-    videoPrompt: "",
-    refImages: [],
-    status: "draft",
+    id: "", chapterId: chapterId.value, index: allShots.value.length + 1, sceneId: null,
+    location: "", timeOfDay: "白天", interior: true, shotSize: "中景", camera: "平视",
+    cameraMove: "固定", durationSec: 3, characters: [], props: [], action: "",
+    dialogue: "", narration: "", sfx: "", bgm: "", imagePrompt: "", videoPrompt: "",
+    refImages: [], status: "draft",
   };
 }
 
-function addShot() {
-  editing.value = emptyShot();
-}
-
-function edit(shot: Shot) {
-  editing.value = JSON.parse(JSON.stringify(shot));
+function edit(s: Shot) {
+  editing.value = JSON.parse(JSON.stringify(s));
 }
 
 async function saveShot() {
   if (!editing.value) return;
-  if (!editing.value.action.trim()) {
-    message.warning("画面动作不能为空");
-    return;
-  }
+  if (!editing.value.action.trim()) return toast.warn("画面动作不能为空");
   try {
+    const isNew = !editing.value.id;
     await project.upsertShot(editing.value);
-    editing.value = null;
+    toast.ok(isNew ? "镜头已新增" : "镜头已更新");
   } catch (e) {
-    message.error(errorText(e));
+    toast.err(errorText(e));
   }
 }
 
-function removeShot(shot: Shot) {
-  dialog.warning({
+async function remove(s: Shot) {
+  const ok = await confirmDialog({
     title: "删除镜头",
-    content: `确定删除镜头 ${shot.index}？对应的视频提示词也会一起删掉。`,
+    content: `确定删除镜头 ${s.index}？对应的视频提示词会一起删掉。`,
     positiveText: "删除",
-    negativeText: "取消",
-    onPositiveClick: async () => {
-      await project.deleteShot(shot.id);
-      message.success("已删除");
-    },
+    danger: true,
   });
+  if (!ok) return;
+  await project.deleteShot(s.id);
+  if (editing.value?.id === s.id) editing.value = null;
 }
 
-async function move(shot: Shot, dir: -1 | 1) {
-  const list = shots.value.map((s) => ({ ...s }));
-  const i = list.findIndex((s) => s.id === shot.id);
+async function move(s: Shot, dir: -1 | 1) {
+  const list = allShots.value.map((x) => ({ ...x }));
+  const i = list.findIndex((x) => x.id === s.id);
   const j = i + dir;
   if (j < 0 || j >= list.length) return;
   [list[i], list[j]] = [list[j], list[i]];
-  list.forEach((s, idx) => (s.index = idx + 1));
+  list.forEach((x, idx) => (x.index = idx + 1));
   await project.setShots(chapterId.value, list);
 }
 
-/** 从章节大纲粗略估算镜头数，生成占位行，方便 agent 在此基础上细化 */
-async function draftFromChapter() {
+async function draftRows() {
   const ch = chapters.value.find((c) => c.id === chapterId.value);
   if (!ch) return;
   const n = Math.max(3, Math.min(12, Math.round((ch.wordCount || 600) / 120)));
-  const list: Shot[] = [];
-  for (let i = 0; i < n; i++) {
-    list.push({
-      ...emptyShot(),
-      index: i + 1,
-      shotSize: i === 0 ? "全景" : i % 3 === 0 ? "特写" : "中景",
-      action: "",
-      status: "draft",
-    });
-  }
+  const list: Shot[] = Array.from({ length: n }, (_, i) => ({
+    ...blank(),
+    index: i + 1,
+    shotSize: i === 0 ? "全景" : i % 3 === 0 ? "特写" : "中景",
+  }));
   await project.setShots(chapterId.value, list);
-  message.info(`已生成 ${n} 行空白镜头，可以逐条填，或让右侧 agent 直接写完整章分镜`);
+  toast.info(`已生成 ${n} 行空白镜头，或让右侧 agent 直接写完整章`);
+}
+
+function askAgent() {
+  const ch = chapters.value.find((c) => c.id === chapterId.value);
+  agent.send("storyboard", `帮我把「${ch?.title}」这一章写完整的分镜，用 storyboard_write_shots 一次写入。`);
 }
 </script>
 
 <template>
-  <div class="wrap">
-    <div class="toolbar">
-      <n-select
-        v-model:value="chapterId"
-        size="small"
-        style="width: 200px"
-        :options="chapters.map((c) => ({ label: `第${c.index}章 ${c.title}`, value: c.id }))"
-        placeholder="选择章节"
-      />
-      <span class="tiny faint">
-        {{ shots.length }} 个镜头 · 合计 {{ totalDuration.toFixed(1) }} 秒
-      </span>
-      <div class="grow" />
-      <n-button size="small" quaternary @click="draftFromChapter">按大纲生成空行</n-button>
-      <n-button size="small" @click="addShot">＋ 新增镜头</n-button>
-    </div>
+  <div class="layout">
+    <section class="panel shots-panel">
+      <header class="panel-head">
+        <UiSelect
+          :model-value="chapterId"
+          :options="chapters.map((c) => ({ label: `第${c.index}章 ${c.title}`, value: c.id }))"
+          style="flex: 1; min-width: 0"
+          @update:model-value="(v: string | null) => { chapterId = v ?? ''; editing = null; }"
+        />
+        <div class="row" style="gap: 4px; flex: 0 0 auto">
+          <UiBadge tone="neutral" size="xs"><Film :size="9" /> {{ allShots.length }}</UiBadge>
+          <UiBadge tone="neutral" size="xs"><Clock :size="9" /> {{ total.toFixed(1) }}s</UiBadge>
+        </div>
+      </header>
 
-    <div class="pane scroll table">
-      <div v-if="!shots.length" class="tiny faint empty">
-        这一章还没有分镜。可以手动加，或让右侧 agent 写完整章镜头表（它会调用
-        storyboard_write_shots 一次性写入）。
+      <div class="filterbar">
+        <UiSegmented
+          v-model="statusFilter"
+          size="xs"
+          :items="[
+            { label: '全部', value: 'all' },
+            { label: '草稿', value: 'draft' },
+            { label: '就绪', value: 'ready' },
+          ]"
+        />
+        <span class="grow" />
+        <UiButton variant="subtle" size="xs" @click="draftRows">生成空行</UiButton>
+        <UiButton variant="default" size="xs" @click="editing = blank()">
+          <template #icon><Plus :size="12" /></template>
+          新增
+        </UiButton>
       </div>
-      <div v-for="s in shots" :key="s.id" class="shot" :class="{ editing: editing?.id === s.id }">
-        <div class="num mono">{{ s.index }}</div>
-        <div class="col grow" style="gap: 2px; min-width: 0">
-          <div class="row wrap" style="gap: 4px">
-            <span class="tag accent">{{ s.shotSize }}</span>
-            <span class="tag">{{ s.cameraMove }}</span>
-            <span v-if="s.timeOfDay" class="tag">{{ s.timeOfDay }}</span>
-            <span v-if="s.location" class="tag">{{ s.location }}</span>
-            <span class="tag">{{ s.durationSec }}s</span>
-            <span v-if="s.characters.length" class="tag">
-              {{ s.characters.join("、") }}
-            </span>
+
+      <div class="list scroll">
+        <div
+          v-for="s in shots"
+          :key="s.id"
+          class="shot"
+          :class="{ on: editing?.id === s.id }"
+          @click="edit(s)"
+        >
+          <div class="sidx num">{{ s.index }}</div>
+          <div class="col grow" style="gap: 3px; min-width: 0">
+            <div class="row wrap" style="gap: 4px">
+              <UiBadge tone="accent" size="xs">{{ s.shotSize }}</UiBadge>
+              <UiBadge tone="neutral" size="xs">{{ s.cameraMove }}</UiBadge>
+              <UiBadge tone="neutral" size="xs">{{ s.durationSec }}s</UiBadge>
+              <span v-if="s.location" class="t-xs faint">{{ s.location }}</span>
+              <span v-if="s.characters.length" class="t-xs faint">· {{ s.characters.join("、") }}</span>
+            </div>
+            <div class="saction truncate">{{ s.action || "（未填画面动作）" }}</div>
+            <div v-if="s.dialogue" class="t-xs faint truncate">「{{ s.dialogue }}」</div>
           </div>
-          <div class="truncate" :title="s.action">{{ s.action || "（未填画面动作）" }}</div>
-          <div v-if="s.dialogue" class="tiny faint truncate">台词：{{ s.dialogue }}</div>
-        </div>
-        <div class="row" style="gap: 0; flex: 0 0 auto">
-          <button class="mini" @click="move(s, -1)">↑</button>
-          <button class="mini" @click="move(s, 1)">↓</button>
-          <n-button size="tiny" quaternary @click="edit(s)">编辑</n-button>
-          <n-button size="tiny" quaternary @click="removeShot(s)">删</n-button>
-        </div>
-      </div>
-    </div>
-
-    <!-- 编辑抽屉 -->
-    <div v-if="editing" class="pane editor">
-      <div class="row-between head">
-        <span style="font-weight: 600">
-          {{ editing.id ? `编辑镜头 ${editing.index}` : "新增镜头" }}
-        </span>
-        <div class="row" style="gap: 4px">
-          <n-button size="tiny" quaternary @click="editing = null">取消</n-button>
-          <n-button size="tiny" type="primary" @click="saveShot">保存</n-button>
-        </div>
-      </div>
-      <div class="scroll body">
-        <div class="grid3">
-          <label>景别
-            <n-select v-model:value="editing.shotSize" size="small" tag filterable :options="vocab.shotSizes.map((v) => ({ label: v, value: v }))" />
-          </label>
-          <label>运镜
-            <n-select v-model:value="editing.cameraMove" size="small" tag filterable :options="vocab.cameraMoves.map((v) => ({ label: v, value: v }))" />
-          </label>
-          <label>时长（秒）
-            <n-input-number v-model:value="editing.durationSec" size="small" :min="0.5" :max="20" :step="0.5" />
-          </label>
-          <label>时间
-            <n-select v-model:value="editing.timeOfDay" size="small" tag filterable :options="vocab.timeOfDay.map((v) => ({ label: v, value: v }))" />
-          </label>
-          <label>地点
-            <n-input v-model:value="editing.location" size="small" placeholder="如 总裁办公室" />
-          </label>
-          <label>内景
-            <div><n-switch v-model:value="editing.interior" size="small" /></div>
-          </label>
+          <div class="col" style="gap: 4px; align-items: flex-end; flex: 0 0 auto">
+            <UiBadge :tone="STATUS[s.status].tone" size="xs">{{ STATUS[s.status].label }}</UiBadge>
+            <div class="ops">
+              <button class="op" @click.stop="move(s, -1)">↑</button>
+              <button class="op" @click.stop="move(s, 1)">↓</button>
+              <button class="op danger" @click.stop="remove(s)"><Trash2 :size="11" /></button>
+            </div>
+          </div>
         </div>
 
-        <label>机位描述
-          <n-input v-model:value="editing.camera" size="small" placeholder="如 低角度仰拍" />
-        </label>
-        <label>出场人物（逗号分隔，用资产里的名字）
-          <n-select
-            v-model:value="editing.characters"
-            multiple filterable tag size="small"
-            :options="project.assets.map((a) => ({ label: a.name, value: a.name }))"
-          />
-        </label>
-        <label>涉及道具
-          <n-select
-            v-model:value="editing.props"
-            multiple filterable tag size="small"
-            :options="project.assets.filter((a) => a.kind !== 'character').map((a) => ({ label: a.name, value: a.name }))"
-          />
-        </label>
-        <label>画面动作
-          <n-input v-model:value="editing.action" type="textarea" :autosize="{ minRows: 2, maxRows: 4 }" placeholder="这一镜画面里发生了什么" />
-        </label>
-        <label>台词
-          <n-input v-model:value="editing.dialogue" type="textarea" :autosize="{ minRows: 1, maxRows: 3 }" />
-        </label>
-        <label>画外音
-          <n-input v-model:value="editing.narration" size="small" />
-        </label>
-        <div class="grid2">
-          <label>音效
-            <n-input v-model:value="editing.sfx" size="small" />
-          </label>
-          <label>配乐
-            <n-input v-model:value="editing.bgm" size="small" />
-          </label>
-        </div>
-        <label>静态画面提示词（可选）
-          <n-input v-model:value="editing.imagePrompt" type="textarea" :autosize="{ minRows: 2, maxRows: 4 }" />
-        </label>
-        <label>状态
-          <n-select v-model:value="editing.status" size="small" :options="statusOptions" />
-        </label>
+        <UiEmpty
+          v-if="!shots.length"
+          title="这一章还没有分镜"
+          hint="按大纲生成空行逐条填，或者直接让 agent 写完整章镜头表"
+        >
+          <template #icon><Film :size="26" /></template>
+          <UiButton variant="outline" size="sm" @click="askAgent">
+            <template #icon><Wand2 :size="13" /></template>
+            让 agent 写这一章
+          </UiButton>
+        </UiEmpty>
       </div>
-    </div>
+    </section>
+
+    <section class="panel editor-panel">
+      <template v-if="editing">
+        <header class="panel-head">
+          <span class="section-label">{{ editing.id ? `镜头 ${editing.index}` : "新增镜头" }}</span>
+          <div class="row" style="gap: 4px">
+            <UiButton variant="ghost" size="xs" @click="editing = null">关闭</UiButton>
+            <UiButton variant="primary" size="sm" @click="saveShot">保存</UiButton>
+          </div>
+        </header>
+
+        <div class="form scroll">
+          <div class="grid3">
+            <UiField label="景别">
+              <UiSelect v-model="editing.shotSize" creatable :options="vocab.shotSizes.map((v) => ({ label: v, value: v }))" />
+            </UiField>
+            <UiField label="运镜">
+              <UiSelect v-model="editing.cameraMove" creatable :options="vocab.cameraMoves.map((v) => ({ label: v, value: v }))" />
+            </UiField>
+            <UiField label="时长">
+              <UiNumber v-model="editing.durationSec" :min="0.5" :max="20" :step="0.5" suffix="s" />
+            </UiField>
+          </div>
+
+          <div class="grid3">
+            <UiField label="时间">
+              <UiSelect v-model="editing.timeOfDay" creatable :options="vocab.timeOfDay.map((v) => ({ label: v, value: v }))" />
+            </UiField>
+            <UiField label="地点">
+              <UiInput v-model="editing.location" placeholder="办公室" />
+            </UiField>
+            <UiField label="内景">
+              <UiSwitch v-model="editing.interior" />
+            </UiField>
+          </div>
+
+          <UiField label="机位">
+            <UiInput v-model="editing.camera" placeholder="低角度仰拍" />
+          </UiField>
+
+          <UiField label="出场人物">
+            <UiSelect
+              :model-value="editing.characters[0] ?? null"
+              :options="project.assets.map((a) => ({ label: a.name, value: a.name }))"
+              clearable
+              placeholder="选一个（或让 agent 批量填）"
+              @update:model-value="(v: string | null) => (editing!.characters = v ? [v] : [])"
+            />
+          </UiField>
+
+          <UiField label="画面动作">
+            <UiTextarea v-model="editing.action" :rows="3" placeholder="这一镜画面里发生了什么" />
+          </UiField>
+
+          <UiField label="台词">
+            <UiTextarea v-model="editing.dialogue" :rows="2" placeholder="角色名：内容" />
+          </UiField>
+
+          <UiField label="画外音"><UiInput v-model="editing.narration" /></UiField>
+
+          <div class="grid2">
+            <UiField label="音效"><UiInput v-model="editing.sfx" /></UiField>
+            <UiField label="配乐"><UiInput v-model="editing.bgm" /></UiField>
+          </div>
+
+          <UiField label="静态画面提示词" hint="可选">
+            <UiTextarea v-model="editing.imagePrompt" :rows="2" />
+          </UiField>
+
+          <UiField label="状态">
+            <UiSelect v-model="editing.status" :options="statusOptions" />
+          </UiField>
+        </div>
+      </template>
+
+      <UiEmpty v-else title="选一个镜头" hint="从左侧点一个镜头，或在右上新增">
+        <template #icon><Sparkles :size="26" /></template>
+      </UiEmpty>
+    </section>
   </div>
 </template>
 
 <style scoped>
-.wrap {
+.layout {
   display: flex;
-  gap: 12px;
+  gap: var(--sp-3);
   height: 100%;
   min-height: 0;
-  flex-wrap: wrap;
 }
-.toolbar {
-  flex: 0 0 100%;
+.shots-panel {
+  flex: 1;
+  min-width: 0;
+}
+.editor-panel {
+  width: 340px;
+  flex: 0 0 340px;
+}
+.filterbar {
   display: flex;
   align-items: center;
-  gap: 10px;
-  height: 34px;
+  gap: 5px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line-faint);
 }
-.table {
+.list {
   flex: 1;
-  min-width: 420px;
   min-height: 0;
-  padding: 6px;
+  padding: var(--sp-2);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 .shot {
   display: flex;
   gap: 10px;
-  padding: 8px 10px;
-  border-radius: 6px;
-  border-left: 2px solid transparent;
+  padding: 9px 10px;
+  border-radius: var(--r);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background var(--fast), border-color var(--fast);
 }
 .shot:hover {
-  background: var(--bg-3);
+  background: var(--surface-3);
 }
-.shot.editing {
-  border-left-color: var(--accent);
-  background: var(--accent-soft);
+.shot.on {
+  background: var(--surface-3);
+  border-color: var(--line-strong);
 }
-.num {
-  width: 22px;
+.sidx {
+  width: 20px;
   flex: 0 0 auto;
-  color: var(--text-faint);
-  font-size: 12px;
-  padding-top: 2px;
+  font-size: var(--t-xs);
+  color: var(--fg-ghost);
+  text-align: right;
+  padding-top: 3px;
 }
-.editor {
-  width: 420px;
-  flex: 0 0 420px;
+.saction {
+  font-size: var(--t-base);
+}
+.ops {
   display: flex;
-  flex-direction: column;
-  min-height: 0;
-  overflow: hidden;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity var(--fast);
 }
-.head {
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--line-soft);
+.shot:hover .ops {
+  opacity: 1;
 }
-.body {
+.op {
+  background: none;
+  border: none;
+  color: var(--fg-ghost);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 0 3px;
+  border-radius: var(--r-xs);
+  line-height: 1;
+}
+.op:hover {
+  color: var(--fg);
+  background: var(--surface-4);
+}
+.op.danger:hover {
+  color: var(--err);
+}
+.form {
   flex: 1;
   min-height: 0;
-  padding: 10px 12px;
+  padding: var(--sp-4);
   display: flex;
   flex-direction: column;
-  gap: 10px;
-}
-.body label {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 12px;
-  color: var(--text-dim);
+  gap: var(--sp-3);
 }
 .grid2 {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 10px;
+  gap: var(--sp-3);
 }
 .grid3 {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
-  gap: 10px;
-}
-.grid3 label {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 12px;
-  color: var(--text-dim);
-}
-.mini {
-  background: none;
-  border: none;
-  color: var(--text-faint);
-  cursor: pointer;
-  font-size: 11px;
-  padding: 0 3px;
-}
-.mini:hover {
-  color: var(--text);
-}
-.empty {
-  padding: 24px;
-  text-align: center;
-  line-height: 1.9;
+  gap: var(--sp-2);
 }
 </style>

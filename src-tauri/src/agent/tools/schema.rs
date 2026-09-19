@@ -301,6 +301,20 @@ pub fn asset_generate_missing() -> Value {
     )
 }
 
+pub fn ask_user() -> Value {
+    obj(
+        json!({
+            "question": s("要问用户的问题，一次只问一件事"),
+            "options": arr(
+                "候选项，前端会渲染成按钮；不给就让用户自由作答",
+                s("候选项文本")
+            ),
+            "why": s("为什么需要问（可选，帮用户快速判断）")
+        }),
+        &["question"],
+    )
+}
+
 pub fn asset_view_image() -> Value {
     obj(
         json!({

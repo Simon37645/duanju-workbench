@@ -17,6 +17,28 @@ use crate::state::AppState;
 
 pub type ToolFuture = BoxFuture<'static, Result<ToolOutcome>>;
 
+/// 只读工具：不会改项目数据。其余工具一律视为会写数据，
+/// 「变更前确认」模式靠这个集合判断要不要弹确认。
+pub const READ_ONLY_TOOLS: &[&str] = &[
+    "project_snapshot",
+    "checklist_report",
+    "script_read_chapter",
+    "style_list_presets",
+    "storyboard_list_shots",
+    "asset_list",
+    "prompt_list",
+    "video_list_takes",
+    "edit_get_timeline",
+    "subtitle_list",
+    "asset_view_image",
+    "file_view_image",
+    "ask_user",
+];
+
+pub fn is_read_only(name: &str) -> bool {
+    READ_ONLY_TOOLS.contains(&name)
+}
+
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolOutcome {
@@ -1117,6 +1139,14 @@ async fn t_asset_generate_missing(ctx: ToolCtx, args: Value) -> Result<ToolOutco
     ))
 }
 
+/* ============================ 提问 ============================ */
+
+/// 占位实现。真正的「挂起等人回答」在 agent 的 run loop 里做 ——
+/// 那里才能拿到事件通道与等待队列。这个 handler 不会被调用到。
+async fn t_ask_user(_ctx: ToolCtx, _args: Value) -> Result<ToolOutcome> {
+    Err(AppError::other("ask_user 由运行循环处理，不应直接执行"))
+}
+
 /* ============================== 看图 ============================== */
 
 async fn t_asset_view_image(ctx: ToolCtx, args: Value) -> Result<ToolOutcome> {
@@ -1753,7 +1783,11 @@ fn parse_panel(s: &str) -> Result<PanelId> {
 
 /* ============================ 注册表 ============================ */
 
-pub fn registry(panel: PanelId) -> Vec<Tool> {
+/// 返回**全部**工具。
+///
+/// 以前是按面板裁剪的，但 agent 现在是共享上下文、可以跨面板操作，
+/// 所以工具集也合并成一份。参数 `_panel` 保留只是为了调用点少改一点。
+pub fn registry(_panel: PanelId) -> Vec<Tool> {
     let mut tools = vec![
         tool!(
             "project_snapshot",
@@ -1788,6 +1822,16 @@ pub fn registry(panel: PanelId) -> Vec<Tool> {
             t_checklist_toggle
         ),
         tool!(
+            "ask_user",
+            "向用户提问",
+            "拿不准用户想要什么、或者需要在几个方案里做选择时，用它直接问，不要猜。
+可以给出候选项（options），前端会渲染成按钮；也可以不给，用户自由作答。
+一次问一件事，问完就停下等回答。",
+            schema::ask_user(),
+            false,
+            t_ask_user
+        ),
+        tool!(
             "asset_view_image",
             "查看资产图片",
             "把某个资产已生成的图放进你的视觉上下文，用来做一致性检查（人物三视图是否同一个人、场景风格是否统一）。不传 viewId 时最多取 4 张。",
@@ -1813,8 +1857,9 @@ pub fn registry(panel: PanelId) -> Vec<Tool> {
         ),
     ];
 
-    match panel {
-        PanelId::Script => tools.extend(vec![
+    // 九个面板的工具全部注册进来
+    {
+        tools.extend(vec![
             tool!(
                 "script_set_chapters",
                 "设定章节骨架",
@@ -1847,8 +1892,8 @@ pub fn registry(panel: PanelId) -> Vec<Tool> {
                 false,
                 t_script_write_chapter
             ),
-        ]),
-        PanelId::Style => tools.extend(vec![
+        ]);
+        tools.extend(vec![
             tool!(
                 "style_list_presets",
                 "列出风格预设",
@@ -1873,8 +1918,8 @@ pub fn registry(panel: PanelId) -> Vec<Tool> {
                 false,
                 t_style_set
             ),
-        ]),
-        PanelId::Storyboard => tools.extend(vec![
+        ]);
+        tools.extend(vec![
             tool!(
                 "storyboard_list_shots",
                 "列出镜头",
@@ -1907,8 +1952,8 @@ pub fn registry(panel: PanelId) -> Vec<Tool> {
                 false,
                 t_storyboard_update_shot
             ),
-        ]),
-        PanelId::Asset => tools.extend(vec![
+        ]);
+        tools.extend(vec![
             tool!(
                 "asset_list",
                 "列出资产",
@@ -1949,8 +1994,8 @@ pub fn registry(panel: PanelId) -> Vec<Tool> {
                 true,
                 t_asset_generate_missing
             ),
-        ]),
-        PanelId::Prompt => tools.extend(vec![
+        ]);
+        tools.extend(vec![
             tool!(
                 "prompt_list",
                 "列出视频提示词",
@@ -1983,8 +2028,8 @@ pub fn registry(panel: PanelId) -> Vec<Tool> {
                 false,
                 t_prompt_autofill
             ),
-        ]),
-        PanelId::Video => tools.extend(vec![
+        ]);
+        tools.extend(vec![
             tool!(
                 "video_list_takes",
                 "列出生成记录",
@@ -2009,8 +2054,8 @@ pub fn registry(panel: PanelId) -> Vec<Tool> {
                 true,
                 t_video_generate_batch
             ),
-        ]),
-        PanelId::Edit => tools.extend(vec![
+        ]);
+        tools.extend(vec![
             tool!(
                 "edit_get_timeline",
                 "读取时间线",
@@ -2059,8 +2104,8 @@ pub fn registry(panel: PanelId) -> Vec<Tool> {
                 false,
                 t_edit_render
             ),
-        ]),
-        PanelId::Subtitle => tools.extend(vec![
+        ]);
+        tools.extend(vec![
             tool!(
                 "subtitle_list",
                 "列出字幕",
@@ -2085,8 +2130,7 @@ pub fn registry(panel: PanelId) -> Vec<Tool> {
                 false,
                 t_subtitle_update_cues
             ),
-        ]),
-        PanelId::Checklist => {}
+        ]);
     }
 
     tools

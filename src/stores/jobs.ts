@@ -20,7 +20,7 @@ export const useJobsStore = defineStore("jobs", {
   state: (): State => ({
     jobs: [],
     _unlisten: null,
-    barOpen: true,
+    barOpen: false,
   }),
 
   getters: {
@@ -40,8 +40,13 @@ export const useJobsStore = defineStore("jobs", {
           this.jobs = p.jobs;
         } else if (p.type === "update" && p.job) {
           const i = this.jobs.findIndex((j) => j.id === p.job!.id);
+          const isNew = i < 0;
           if (i >= 0) this.jobs[i] = p.job;
           else this.jobs.unshift(p.job);
+          // 有新任务开始跑就自动展开，跑完不自动收起（用户可能想看结果）
+          if (isNew && (p.job.status === "running" || p.job.status === "queued")) {
+            this.barOpen = true;
+          }
         }
       }).then((fn) => {
         this._unlisten = fn;

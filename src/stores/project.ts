@@ -1,7 +1,7 @@
 import { defineStore } from "pinia";
 import { api, errorText } from "@/api/ipc";
 import { onProjectChanged } from "@/api/events";
-import { message } from "@/utils/notify";
+import { message } from "@/ui";
 import type {
   Asset,
   AssetView,

@@ -1,0 +1,174 @@
+/**
+ * 设计变量。
+ *
+ * 两条最影响观感的决定：
+ * 1. **边框用低透明度**（深色下白 7%，亮色下黑 8%）而不是灰色实线。
+ *    灰线在深色底上会形成一圈"描边"，看起来又脏又挤；低透明度边框会自然融进背景。
+ * 2. **用表面层级代替边框**：靠 --surface-1..5 的明度差表达结构，边框只做辅助。
+ *
+ * 主题通过 <html data-theme="dark|light"> 切换，组件里不要写死颜色。
+ */
+
+:root,
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* ---------------------------------------------------------- 表面层级 */
+  --bg: #09090b;
+  --surface-1: #101013;
+  --surface-2: #16161a;
+  --surface-3: #1c1c21;
+  --surface-4: #26262c;
+  --surface-5: #33333a;
+
+  /* ------------------------------------------------------------ 边框 */
+  --line: rgba(255, 255, 255, 0.07);
+  --line-strong: rgba(255, 255, 255, 0.12);
+  --line-faint: rgba(255, 255, 255, 0.04);
+
+  /* ------------------------------------------------------------ 文字 */
+  --fg: #f4f4f5;
+  --fg-dim: #a1a1aa;
+  --fg-faint: #6b6b76;
+  --fg-ghost: #4a4a52;
+
+  /* ------------------------------------------------------------ 主色 */
+  --accent: #f0a33d;
+  --accent-hover: #f7b458;
+  --accent-press: #d98f2b;
+  --accent-fg: #1a1206;
+  --accent-soft: rgba(240, 163, 61, 0.12);
+  --accent-line: rgba(240, 163, 61, 0.3);
+
+  /* ------------------------------------------------------------ 语义色 */
+  --ok: #4ade80;
+  --ok-soft: rgba(74, 222, 128, 0.12);
+  --warn: #fbbf24;
+  --warn-soft: rgba(251, 191, 36, 0.12);
+  --err: #f87171;
+  --err-soft: rgba(248, 113, 113, 0.12);
+  --info: #60a5fa;
+  --info-soft: rgba(96, 165, 250, 0.12);
+  --violet: #a78bfa;
+  --violet-soft: rgba(167, 139, 250, 0.12);
+
+  /* ------------------------------------------- 特殊表面（媒体/浮层/代码） */
+  --media-bg: #0b0b0e;
+  --code-bg: #0d0d10;
+  --overlay-bg: rgba(0, 0, 0, 0.55);
+  --tooltip-bg: #000000;
+  --tooltip-fg: #f4f4f5;
+  --mask-bg: rgba(0, 0, 0, 0.78);
+  --glow: rgba(240, 163, 61, 0.09);
+
+  /* ------------------------------------------------------- 时间线片段 */
+  --clip-video-bg: #253352;
+  --clip-video-fg: #c3d3ee;
+  --clip-audio-bg: #1f3a30;
+  --clip-audio-fg: #a9d9c1;
+  --clip-sub-bg: #3a3024;
+  --clip-sub-fg: #e6cda6;
+  --clip-overlay-bg: #31243d;
+  --clip-overlay-fg: #d4bce4;
+
+  /* ------------------------------------------------------------ 阴影 */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-sm: 0 2px 6px -1px rgba(0, 0, 0, 0.4);
+  --shadow: 0 6px 20px -6px rgba(0, 0, 0, 0.55);
+  --shadow-lg: 0 20px 60px -16px rgba(0, 0, 0, 0.75);
+  --ring: 0 0 0 2px rgba(240, 163, 61, 0.35);
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+
+  --bg: #f7f7f9;
+  --surface-1: #ffffff;
+  --surface-2: #ffffff;
+  --surface-3: #f4f4f6;
+  --surface-4: #eaeaee;
+  --surface-5: #d8d8df;
+
+  --line: rgba(24, 24, 27, 0.08);
+  --line-strong: rgba(24, 24, 27, 0.14);
+  --line-faint: rgba(24, 24, 27, 0.05);
+
+  --fg: #18181b;
+  --fg-dim: #55555f;
+  --fg-faint: #8a8a94;
+  --fg-ghost: #b6b6bf;
+
+  --accent: #d98218;
+  --accent-hover: #c4740f;
+  --accent-press: #a96208;
+  --accent-fg: #ffffff;
+  --accent-soft: rgba(217, 130, 24, 0.1);
+  --accent-line: rgba(217, 130, 24, 0.32);
+
+  --ok: #15a34a;
+  --ok-soft: rgba(21, 163, 74, 0.1);
+  --warn: #b45309;
+  --warn-soft: rgba(180, 83, 9, 0.1);
+  --err: #dc2626;
+  --err-soft: rgba(220, 38, 38, 0.09);
+  --info: #2563eb;
+  --info-soft: rgba(37, 99, 235, 0.09);
+  --violet: #7c3aed;
+  --violet-soft: rgba(124, 58, 237, 0.09);
+
+  --media-bg: #eceef2;
+  --code-bg: #f4f4f6;
+  --overlay-bg: rgba(24, 24, 27, 0.35);
+  --tooltip-bg: #27272a;
+  --tooltip-fg: #fafafa;
+  --mask-bg: rgba(24, 24, 27, 0.4);
+  --glow: rgba(217, 130, 24, 0.1);
+
+  --clip-video-bg: #dbe6fb;
+  --clip-video-fg: #1f3a6e;
+  --clip-audio-bg: #d6f0e2;
+  --clip-audio-fg: #14503a;
+  --clip-sub-bg: #f6e7cf;
+  --clip-sub-fg: #6b4a15;
+  --clip-overlay-bg: #ece0f8;
+  --clip-overlay-fg: #4a2b73;
+
+  --shadow-xs: 0 1px 2px rgba(24, 24, 27, 0.06);
+  --shadow-sm: 0 2px 6px -1px rgba(24, 24, 27, 0.08);
+  --shadow: 0 6px 20px -6px rgba(24, 24, 27, 0.12);
+  --shadow-lg: 0 20px 60px -16px rgba(24, 24, 27, 0.18);
+  --ring: 0 0 0 2px rgba(217, 130, 24, 0.3);
+}
+
+/* ------------------------------------------------------------ 与主题无关 */
+:root {
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r: 9px;
+  --r-lg: 13px;
+  --r-xl: 18px;
+  --r-full: 999px;
+
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+
+  --t-xs: 11px;
+  --t-sm: 12px;
+  --t-base: 13px;
+  --t-md: 14px;
+  --t-lg: 16px;
+  --t-xl: 20px;
+  --t-2xl: 26px;
+
+  --ease: cubic-bezier(0.32, 0.72, 0, 1);
+  --fast: 120ms var(--ease);
+  --normal: 180ms var(--ease);
+
+  --sidebar-w: 208px;
+  --topbar-h: 48px;
+}

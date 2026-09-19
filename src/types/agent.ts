@@ -56,7 +56,16 @@ export type AgentEvent =
       title: string;
       input: unknown;
       costly: boolean;
+      /** 会不会改项目数据 */
+      mutates: boolean;
       needsConfirm: boolean;
+    }
+  | {
+      type: "askUser";
+      id: string;
+      question: string;
+      options: string[];
+      why: string;
     }
   | {
       type: "toolResult";
@@ -98,22 +107,32 @@ export interface AgentToolCall {
   title: string;
   input: unknown;
   costly: boolean;
+  mutates?: boolean;
   state: "pending" | "awaiting-approval" | "running" | "ok" | "failed" | "rejected";
   summary?: string;
   data?: unknown;
   durationMs?: number;
 }
 
+/** 与 Rust 侧 AgentSession 一一对应 */
 export interface AgentSession {
   id: string;
   projectId: string;
   panel: PanelId;
   title: string;
-  messages: AgentMessage[];
-  running: boolean;
-  lastPrefix?: PrefixReport;
-  lastUsage?: UsageReport;
+  /** 给模型看的原始消息（含 content blocks），界面不要直接渲染 */
+  messages: unknown[];
+  /** 给界面渲染的消息，包含工具卡片 */
+  display: AgentMessage[];
+  prefix: unknown | null;
+  lastProviderId: string | null;
+  lastModel: string | null;
+  turns: number;
+  totalUsage: unknown;
+  totalCacheRead: number;
+  totalInput: number;
   createdAt: string;
+  updatedAt: string;
 }
 
 export interface AgentRunOptions {

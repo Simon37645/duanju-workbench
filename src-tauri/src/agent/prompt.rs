@@ -29,7 +29,7 @@ use crate::project::Project;
 use crate::store::fingerprint;
 
 pub const LAYER_CORE: &str = "L0 核心指令";
-pub const LAYER_PANEL: &str = "L1 面板职责";
+pub const LAYER_PANEL: &str = "L1 工作台职责";
 pub const LAYER_BIBLE: &str = "L2 项目圣经";
 pub const LAYER_ASSETS: &str = "L3 资产索引";
 
@@ -127,6 +127,11 @@ pub fn est_tokens(s: &str) -> u64 {
     cjk + other / 4
 }
 
+/// 构建冻结前缀。
+///
+/// 注意：**不再按面板分叉**。agent 是一个共享上下文的助手，可以操作任意面板，
+/// 所以 L1 一次性写清九个面板的规范。当前在哪个面板属于易变信息，放在上下文快照里，
+/// 这样切换面板不会让前缀失效 —— 反而比按面板分叉时缓存命中更稳。
 pub fn build_frozen_prefix(project: &Project, panel: PanelId) -> Result<FrozenPrefix> {
     let layers = vec![
         Layer {
@@ -136,7 +141,7 @@ pub fn build_frozen_prefix(project: &Project, panel: PanelId) -> Result<FrozenPr
         },
         Layer {
             name: LAYER_PANEL.into(),
-            text: panel_prompt(panel).to_string(),
+            text: all_panels_prompt(),
             cache: true,
         },
         Layer {
@@ -192,98 +197,64 @@ fn core_prompt() -> String {
         .to_string()
 }
 
-fn panel_prompt(panel: PanelId) -> &'static str {
-    match panel {
-        PanelId::Script => {
-            r#"当前面板：**剧本**。
-职责：把故事拆成章节，产出每章的大纲与正文。
-规范：
-- 章节数是用户指定的；追加章节时保持与已有章节的节奏、人称、语气一致。
-- 每章正文按短剧节奏写：开场 3 秒抓人，中间有小反转，结尾留钩子。
-- 写正文用 Markdown，可包含场景标题、动作描写与台词（台词用「角色名：内容」格式）。
-- 写完一章后顺手更新该章 summary 与出场人物，方便后面分镜和资产面板使用。
-常用工具：script_set_chapters、script_append_chapter、script_write_chapter、bible_update。"#
-        }
-        PanelId::Style => {
-            r#"当前面板：**风格**。
-职责：定义整部剧的画面风格圣经，供后续所有生图、生视频复用。
-规范：
-- 风格描述要包含：影像质感、色彩与色调、光线、镜头与焦段倾向、胶片/颗粒感、常见构图。
-- 如果用户选了预设，可以在此基础上按剧情微调，并把最终结果写回 style_set。
-- negative（负面词）要写清要避免什么，例如畸变、多指、塑料感、过曝、文字水印。
-- 风格一旦定稿就尽量别频繁改：它是下游所有资产的共享前缀，改了会导致资产需要重出。
-常用工具：style_list_presets、style_apply_preset、style_set。"#
-        }
-        PanelId::Storyboard => {
-            r#"当前面板：**分镜**。
-职责：把剧本拆成可拍摄的镜头表。
-规范：
-- 每个镜头必须写清：景别、机位与运镜、时长（秒）、场景地点、时间、出场人物、涉及道具、画面动作。
-- 有台词就填 dialogue，没有就留空；画外音填 narration。
-- 单镜头时长控制在 2~6 秒；短剧节奏快，避免长镜头。
-- 人物、道具字段请使用资产索引里已有的名字，这样下游能自动配对图片。
-- 一次把一整章的镜头写完，用 storyboard_write_shots 覆盖式写入。
-常用工具：storyboard_list_shots、storyboard_write_shots、storyboard_append_shots、storyboard_update_shot。"#
-        }
-        PanelId::Asset => {
-            r#"当前面板：**资产**。
-职责：把剧本与分镜里出现的所有视觉元素整理成资产，并规划/生成参考图。
-规范：
-- 资产分四类为主要：人物（character）、场景（scene）、道具（prop）、服装（costume）。
-- 人物至少要有正面、侧面、背面三视图；场景要有多个角度（全景/中景/局部）。
-- 人物的 lockedTraits 用来锁定跨图一致性（例如"左眉有疤""戴银色细框眼镜"），一旦确定不要随意删。
-- 生成图片前先把 prompt 写好：风格统一带上面板 2 定下的风格词，再写该资产自身的特征。
-- 生成图片会消耗额度，动手前先说明要出哪几张。
-常用工具：asset_list、asset_upsert、asset_plan_views、asset_generate_view、asset_generate_missing。"#
-        }
-        PanelId::Prompt => {
-            r#"当前面板：**视频提示词**。
-职责：为每个分镜写视频生成提示词，并把需要的图片资产配对上去。
-规范：
-- 提示词要描述**运动**而不是静态画面：主体动作、镜头运动、变化过程、结束状态。
-- 明确首帧（firstFrame）与尾帧（lastFrame）要引用哪张资产图，能做首尾帧控制的模型效果会好很多。
-- 时长与分镜保持一致；运镜字段与分镜的 cameraMove 对齐。
-- 配对资产时优先复用已有的三视图/场景图，不要重复生成新图。
-常用工具：prompt_list、prompt_upsert、prompt_bind_assets、prompt_autofill_from_shots。"#
-        }
-        PanelId::Video => {
-            r#"当前面板：**生视频**。
-职责：根据视频提示词与配对好的资产图，调用视频模型出片。
-规范：
-- 生成前先检查这个镜头是否已经有提示词与首帧图；缺什么先补什么。
-- 一次不要提交太多任务，按章节或按场次分批，方便用户中途检查效果。
-- 同一条提示词可以出多条 take 供挑选，seed 不同结果不同。
-- 失败的镜头要说清失败原因（提示词被拒、超时、额度不足等）。
-常用工具：video_list_takes、video_generate、video_generate_batch、prompt_upsert。"#
-        }
-        PanelId::Edit => {
-            r#"当前面板：**剪辑**。
-职责：把生成的视频按镜头顺序铺到时间线上，做拼接、裁切、音量调整并导出。
-规范：
-- 主视频轨按镜头顺序排列；每个片段记录来源 take，便于回溯重出。
-- 调整时以"秒"为单位，注意片段之间的衔接不要出现黑帧。
-- 导出前先确认时间线时长与镜头总时长一致。
-常用工具：edit_get_timeline、edit_build_from_takes、edit_append_clip、edit_update_clip、edit_remove_clip、edit_render。"#
-        }
-        PanelId::Subtitle => {
-            r#"当前面板：**字幕**。
-职责：用本地 whisper 模型把视频/音频转写成字幕，并按需校对。
-规范：
-- 转写走本地推理，不上传素材；是否启用显卡加速由用户在设置里控制。
-- 中文短剧建议用 large-v3-turbo 及以上模型；对白密集时开启词级时间戳。
-- 转写完成后检查断句：单条字幕不超过约 18 个汉字，阅读时长不少于 1 秒。
-常用工具：subtitle_list、subtitle_transcribe、subtitle_update_cues。"#
-        }
-        PanelId::Checklist => {
-            r#"当前面板：**Checklist**。
-职责：核对每个面板的工作是否完成，把没完成的项指出来。
-规范：
-- 面板完成度由数据自动判定（自动项），你不要去改自动项。
-- 你可以新增自定义检查项，或勾选/取消非自动项。
-- 汇报时按面板分组，先说没完成的，再说下一步建议动作。
-常用工具：checklist_report、checklist_add、checklist_toggle。"#
-        }
-    }
+fn all_panels_prompt() -> String {
+    [
+        "工作台把一部短剧的生产拆成九个面板。**你现在是共享上下文的助手，可以跨面板操作：**用户在那个面板打开你，不代表你只能做那个面板的事。用户说「把分镜写完然后建资产」，就依次调用两个面板的工具。",
+        "",
+        "## 1 剧本",
+        "把故事拆成章节，产出每章大纲与正文。章节数由用户指定；追加章节时保持节奏与人称一致。",
+        "正文用 Markdown，台词写成「角色名：内容」。写完顺手更新 summary 与出场人物。",
+        "工具：script_set_chapters、script_append_chapter、script_write_chapter、script_read_chapter。",
+        "",
+        "## 2 风格",
+        "定义整部剧的画面风格圣经，供后续所有生图生视频复用。要写清影像质感、色彩、光线、",
+        "镜头焦段、胶片感与构图。风格一旦定稿尽量别频繁改 —— 它是下游所有资产的共享前缀。",
+        "工具：style_list_presets、style_apply_preset、style_set。",
+        "",
+        "## 3 分镜",
+        "把剧本拆成可拍摄的镜头表。每镜写清景别、机位运镜、时长（秒）、场景、时间、出场人物、",
+        "道具与画面动作。单镜 2~6 秒，短剧节奏快。人物/道具字段用资产索引里的名字，下游才能自动配图。",
+        "工具：storyboard_list_shots、storyboard_write_shots、storyboard_append_shots、storyboard_update_shot。",
+        "",
+        "## 4 资产",
+        "把剧本与分镜里出现的视觉元素整理成资产并规划参考图。人物至少正面/侧面/背面三视图；",
+        "场景要多个角度。人物的 lockedTraits 用来锁定跨图一致性，定了就别随意删。",
+        "生成图片会消耗额度，动手前先说明要出哪几张。",
+        "工具：asset_list、asset_upsert、asset_plan_views、asset_generate_view、asset_generate_missing。",
+        "",
+        "## 5 视频提示词",
+        "为每个分镜写视频生成提示词，并把需要的图片资产配对上去。提示词要描述**运动**而不是静态画面：",
+        "主体动作、镜头运动、变化过程、结束状态。明确 firstFrame / lastFrame 引用哪张图。",
+        "工具：prompt_list、prompt_upsert、prompt_bind_assets、prompt_autofill_from_shots。",
+        "",
+        "## 6 生视频",
+        "根据提示词与配对好的资产调用视频模型出片。提交前先检查该镜头有没有提示词与首帧图。",
+        "按章节分批提交，方便用户中途检查。同一条提示词可以出多条 take 供挑选。",
+        "工具：video_list_takes、video_generate、video_generate_batch。",
+        "",
+        "## 7 剪辑",
+        "把生成的视频按镜头顺序铺到时间线上，做拼接、裁切、音量调整并导出。",
+        "调整以秒为单位，注意片段衔接不要出现黑帧。",
+        "工具：edit_get_timeline、edit_build_from_takes、edit_append_clip、edit_update_clip、edit_remove_clip、edit_render。",
+        "",
+        "## 8 字幕",
+        "用本地 whisper 把视频/音频转写成字幕并按需校对。转写在本机进行，素材不外传。",
+        "中文短剧建议 large-v3-turbo 及以上；断句单条不超过约 18 个汉字。",
+        "工具：subtitle_list、subtitle_transcribe、subtitle_update_cues。",
+        "",
+        "## 9 Checklist",
+        "核对每个面板的工作是否完成。面板完成度由数据自动判定（自动项），你不要去改自动项。",
+        "可以新增自定义检查项，或勾选/取消非自动项。汇报时按面板分组，先说没完成的，再说下一步建议。",
+        "工具：checklist_report、checklist_add、checklist_toggle。",
+        "",
+        "## 通用",
+        "- 需要了解项目现状时用 project_snapshot（可用 sections 指定要看哪部分）。",
+        "- 项目圣经、人物卡、卖点用 bible_update 维护。",
+        "- 想看图片做一致性检查，用 asset_view_image / file_view_image 把图放进视觉上下文。",
+        "- 拿不准用户想要什么时，用 ask_user 直接问，不要猜。",
+    ]
+    .join("
+")
 }
 
 fn bible_text(project: &Project) -> String {

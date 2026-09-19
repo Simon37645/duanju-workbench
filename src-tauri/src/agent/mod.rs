@@ -165,6 +165,8 @@ pub enum AgentEvent {
         title: String,
         input: Value,
         costly: bool,
+        /// 会不会改项目数据
+        mutates: bool,
         needs_confirm: bool,
     },
     ToolResult {
@@ -177,6 +179,13 @@ pub enum AgentEvent {
     },
     Usage {
         report: UsageReport,
+    },
+    /// agent 主动向用户提问，前端渲染成卡片并等回答
+    AskUser {
+        id: String,
+        question: String,
+        options: Vec<String>,
+        why: String,
     },
     Round {
         round: u32,
@@ -300,7 +309,7 @@ pub async fn run_turn(
 
     let settings = state.settings();
     let max_rounds = settings.max_tool_rounds.max(1);
-    let confirm_costly = settings.confirm_costly_tools;
+    let mode = settings.agent_mode.clone();
     let tools = tools::registry(opts.panel);
     let mut assistant_display = DisplayMessage::new("assistant", "");
     let mut stop_reason = "endTurn".to_string();
@@ -477,7 +486,13 @@ pub async fn run_turn(
                 .map(|t| t.spec.title.clone())
                 .unwrap_or_else(|| name.clone());
             let costly = spec.map(|t| t.spec.costly).unwrap_or(false);
-            let needs_confirm = costly && confirm_costly;
+            let mutates = !tools::is_read_only(&name);
+            // 三种权限模式
+            let needs_confirm = match mode.as_str() {
+                "yolo" => false,
+                "confirm" => mutates,
+                _ => costly, // auto：自动改数据，只有花钱的才问
+            };
 
             send(
                 &channel,
@@ -487,6 +502,7 @@ pub async fn run_turn(
                     title: title.clone(),
                     input: input.clone(),
                     costly,
+                    mutates,
                     needs_confirm,
                 },
             );
@@ -527,18 +543,54 @@ pub async fn run_turn(
             }
 
             let started = Instant::now();
-            let outcome = match spec {
-                Some(t) => {
-                    let ctx = ToolCtx {
-                        state: state.clone(),
-                        panel: opts.panel,
-                    };
-                    match (t.run)(ctx, input).await {
-                        Ok(o) => Ok(o),
-                        Err(e) => Err(e),
-                    }
+            let outcome = if name == "ask_user" {
+                // 提问：把问题推给前端，挂起等用户回答，回答直接作为工具结果
+                let question = input
+                    .get("question")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let why = input
+                    .get("why")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let options: Vec<String> = input
+                    .get("options")
+                    .and_then(|v| v.as_array())
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|x| x.as_str().map(String::from))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                send(
+                    &channel,
+                    AgentEvent::AskUser {
+                        id: id.clone(),
+                        question: question.clone(),
+                        options,
+                        why,
+                    },
+                );
+                match wait_for_answer(&state, &id).await {
+                    Some(a) => Ok(tools::ToolOutcome::new(
+                        format!("用户回答：{a}"),
+                        Value::String(a),
+                    )),
+                    None => Err(AppError::other("用户没有回答（等待超时）")),
                 }
-                None => Err(AppError::NotFound(format!("工具不存在：{name}"))),
+            } else {
+                match spec {
+                    Some(t) => {
+                        let ctx = ToolCtx {
+                            state: state.clone(),
+                            panel: opts.panel,
+                        };
+                        (t.run)(ctx, input).await
+                    }
+                    None => Err(AppError::NotFound(format!("工具不存在：{name}"))),
+                }
             };
             let ms = started.elapsed().as_millis() as u64;
 
@@ -673,6 +725,33 @@ async fn wait_for_approval(state: &AppState, call_id: &str) -> bool {
             state.agent.approvals.lock().remove(call_id);
             false
         }
+    }
+}
+
+/// 等用户回答提问。与审批共用同一个通道表，key 都是 tool_call_id。
+async fn wait_for_answer(state: &AppState, call_id: &str) -> Option<String> {
+    let (tx, rx) = oneshot::channel::<String>();
+    state
+        .agent
+        .answers
+        .lock()
+        .insert(call_id.to_string(), tx);
+    match tokio::time::timeout(Duration::from_secs(1800), rx).await {
+        Ok(Ok(v)) => Some(v),
+        _ => {
+            state.agent.answers.lock().remove(call_id);
+            None
+        }
+    }
+}
+
+/// 前端提交用户对提问的回答。
+pub fn resolve_answer(state: &AppState, call_id: &str, answer: &str) -> bool {
+    if let Some(tx) = state.agent.answers.lock().remove(call_id) {
+        let _ = tx.send(answer.to_string());
+        true
+    } else {
+        false
     }
 }
 
