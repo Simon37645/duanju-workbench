@@ -105,7 +105,17 @@ OpenAI 兼容端点靠自动前缀缓存，客户端能做的是让前缀逐字�
 - 工具注册顺序固定
 - 对话只追加
 
-### 5. 完成度判定只有一个来源
+### 5. 一个 agent，不是九个
+
+早期版本按面板开九个会话、工具也按面板裁剪。改成共享上下文后：
+
+- **会话只有一条**（`activeSessionId`），面板不再决定用哪个会话；
+- **工具集是全量合并的**，Simon 能在一个回合里跨面板操作；
+- **L1 提示词层写的是九个面板的规范**，不再随当前面板变化 —— 这反而让前缀更稳，
+  切面板不会导致缓存失效；
+- 当前面板只出现在上下文快照（首条用户消息）与开场白里。
+
+### 7. 完成度判定只有一个来源
 
 `progress.rs` 是唯一实现，两处消费：
 
@@ -115,19 +125,30 @@ OpenAI 兼容端点靠自动前缀缓存，客户端能做的是让前缀逐字�
 Checklist 面板里的**自动项**由它实时算出来，不落盘；用户和 agent 能改的只有自定义项。
 这样不会出现「勾了但数据其实没做完」的假象。
 
-### 6. 花钱的操作要确认
+### 6. 权限模式与人工介入
 
-工具定义里带 `costly: true`（生图、批量生图、生视频、批量生视频）。
-执行前如果设置里开了「花钱需确认」，就挂起等前端弹确认：
+agent 有三种模式（`agent_mode`），在 run loop 里按工具性质决定要不要拦下来：
+
+| 模式 | 拦截条件 |
+| --- | --- |
+| yolo | 从不拦截 |
+| auto（默认） | 只拦 `costly`（生图 / 生视频这类花钱的） |
+| confirm | 拦截所有非只读工具 |
+
+两种挂起复用同一套 oneshot 通道：
 
 ```
 run loop ──emit toolCall{needsConfirm}──▶ 前端弹确认
-        ◀──agent_approve(callId, ok)── oneshot 通道
+        ◀──agent_approve(callId, ok)── AgentRuntime.approvals
+
+run loop ──emit askUser{question,options}──▶ 前端渲染提问卡片
+        ◀──agent_answer(callId, text)── AgentRuntime.answers
 ```
 
-用 `oneshot::Sender` 存在 `AgentRuntime.approvals` 里，默认 15 分钟超时按拒绝处理。
+`ask_user` 在 run loop 里特判（不走工具 handler），因为只有那里同时握着事件通道和等待队列。
+超时都按「拒绝 / 未回答」处理（审批 15 分钟、提问 30 分钟）。
 
-### 7. agent 的视觉
+### 8. agent 的视觉
 
 模型要"看见"图，必须把图片放进消息里。两条协议的处理方式不同：
 
@@ -140,7 +161,7 @@ run loop ──emit toolCall{needsConfirm}──▶ 前端弹确认
 
 单张上限 6 MB、一次最多 4 张（够看人物三视图做一致性检查），避免把上下文撑爆。
 
-### 8. 代理
+### 9. 代理
 
 v2rayN / Clash 只改系统代理、不写环境变量，而 HTTP 库默认只认环境变量 ——
 于是"浏览器能上、应用连不上"。`net.rs` 把三种来源统一成一个 `resolve_proxy()`：

@@ -48,13 +48,13 @@ const target = join(dst, exeName);
 const ps = `
 $ErrorActionPreference = 'Stop'
 $desktop = [Environment]::GetFolderPath('Desktop')
-$lnkPath = Join-Path $desktop '短剧工作台.lnk'
+$lnkPath = Join-Path $desktop 'Simon 短剧工作台.lnk'
 $ws = New-Object -ComObject WScript.Shell
 $lnk = $ws.CreateShortcut($lnkPath)
 $lnk.TargetPath = '${target.replace(/'/g, "''")}'
 $lnk.WorkingDirectory = '${dst.replace(/'/g, "''")}'
 $lnk.IconLocation = '${target.replace(/'/g, "''")},0'
-$lnk.Description = '短剧全流程制作工作台'
+$lnk.Description = 'Simon 短剧工作台 · 从剧本到成片'
 $lnk.WindowStyle = 1
 $lnk.Save()
 Write-Output $lnkPath
