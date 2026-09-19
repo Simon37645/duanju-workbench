@@ -3,28 +3,40 @@ import { computed, ref } from "vue";
 import { useRouter } from "vue-router";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
-  ArrowRight, Clock, Film, FolderOpen, FolderPlus, KeyRound, Sparkles, Zap,
+  ArrowRight, BookOpen, Clock, FolderOpen, FolderPlus, KeyRound, Play, Sparkles, Zap,
 } from "@lucide/vue";
 import { useProjectStore } from "@/stores/project";
 import { useSettingsStore } from "@/stores/settings";
-import { errorText } from "@/api/ipc";
+import { api, errorText } from "@/api/ipc";
 import { fmtTime } from "@/api/events";
 import { toast } from "@/ui";
 import UiButton from "@/ui/Button.vue";
 import UiInput from "@/ui/Input.vue";
+import UiBadge from "@/ui/Badge.vue";
 import UiEmpty from "@/ui/Empty.vue";
 
 const router = useRouter();
 const project = useProjectStore();
 const settings = useSettingsStore();
 
-const creating = ref(false);
 const busy = ref(false);
 const newName = ref("");
 const newParent = ref("");
 
 const recents = computed(() => settings.recentProjects);
 const hasModel = computed(() => settings.byKind("llm").length > 0);
+
+const FLOW = [
+  { name: "剧本", desc: "拆章节、写大纲与正文" },
+  { name: "风格", desc: "定画面风格圣经，下游共享" },
+  { name: "分镜", desc: "把剧本拆成可拍的镜头表" },
+  { name: "资产", desc: "人物三视图、场景、道具出图" },
+  { name: "提示词", desc: "写运动提示词并配参考图" },
+  { name: "生视频", desc: "调视频模型按镜头出片" },
+  { name: "剪辑", desc: "铺时间线、裁切、导出成片" },
+  { name: "字幕", desc: "本地 whisper 转写与校对" },
+  { name: "核对", desc: "Checklist 过一遍再交片" },
+];
 
 async function pickParent() {
   const picked = await openDialog({ directory: true, multiple: false, title: "项目存放位置" });
@@ -40,7 +52,7 @@ async function create() {
     await settings.load();
     router.push({ name: "workspace", params: { panel: "script" } });
   } catch {
-    /* store 里已提示 */
+    /* store 已提示 */
   } finally {
     busy.value = false;
   }
@@ -68,124 +80,144 @@ async function browse() {
 <template>
   <div class="home scroll">
     <div class="wrap">
-      <!-- 头部 -->
-      <header class="hero">
-        <div class="mark">S</div>
-        <h1>Simon 短剧工作台</h1>
-        <p class="sub">
-          从剧本到成片的九个面板，Simon 全程陪你做
-        </p>
-        <div class="flow">
-          <span v-for="(s, i) in ['剧本', '风格', '分镜', '资产', '提示词', '生视频', '剪辑', '字幕', '核对']" :key="s">
-            <span class="chipx">{{ s }}</span>
-            <ArrowRight v-if="i < 8" :size="11" class="arrow" />
-          </span>
+      <!-- 顶栏：品牌 + 全局动作 -->
+      <header class="bar">
+        <div class="row" style="gap: 10px; min-width: 0">
+          <div class="mark">S</div>
+          <div class="col" style="gap: 1px; min-width: 0">
+            <h1>Simon 短剧工作台</h1>
+            <span class="t-xs faint truncate">从剧本到成片的九个面板，Simon 全程陪你做</span>
+          </div>
+        </div>
+        <div class="row" style="gap: 6px; flex: 0 0 auto">
+          <UiBadge v-if="!hasModel" tone="warn" size="xs">未配置模型</UiBadge>
+          <UiButton variant="subtle" size="sm" @click="router.push({ name: 'home' })" v-if="false" />
+          <UiButton variant="outline" size="sm" @click="browse">
+            <template #icon><FolderOpen :size="13" /></template>
+            打开项目
+          </UiButton>
         </div>
       </header>
 
-      <!-- 主操作 -->
-      <section class="actions">
-        <button class="action" @click="creating = false; browse()">
-          <FolderOpen :size="18" />
-          <div class="col" style="gap: 2px; align-items: flex-start">
-            <span class="atitle">打开项目</span>
-            <span class="t-xs faint">选择已有的项目目录</span>
-          </div>
-        </button>
-        <button class="action" :class="{ on: creating }" @click="creating = true">
-          <FolderPlus :size="18" />
-          <div class="col" style="gap: 2px; align-items: flex-start">
-            <span class="atitle">新建项目</span>
-            <span class="t-xs faint">创建一份干净的工程</span>
-          </div>
-        </button>
-      </section>
-
-      <!-- 新建表单 -->
-      <Transition name="slide">
-        <section v-if="creating" class="createbox">
-          <div class="grid">
-            <label class="fld">
-              <span>项目名</span>
-              <UiInput v-model="newName" size="md" placeholder="例如 示例短剧" @enter="create" />
-            </label>
-            <label class="fld">
-              <span>存放位置</span>
-              <div class="row" style="gap: 6px">
-                <UiInput v-model="newParent" size="md" placeholder="选择一个文件夹" />
-                <UiButton variant="outline" size="md" @click="pickParent">浏览</UiButton>
-              </div>
-            </label>
-          </div>
-          <div class="row-between">
-            <span class="t-xs faint">
-              会在该位置创建同名目录，里面是纯文件结构，整个目录拷走就能在别的机器打开
-            </span>
-            <UiButton variant="primary" size="md" :loading="busy" @click="create">创建并开始</UiButton>
-          </div>
-        </section>
-      </Transition>
-
-      <!-- 最近项目 -->
-      <section class="col" style="gap: 10px; margin-top: var(--sp-2)">
-        <span class="section-label">最近打开</span>
-        <div v-if="recents.length" class="recents">
-          <button v-for="r in recents" :key="r.path" class="recent" @click="openProject(r.path)">
-            <div class="corner"><Film :size="15" /></div>
-            <div class="col grow" style="gap: 3px; min-width: 0">
-              <span class="rname truncate">{{ r.name }}</span>
-              <span class="t-xs faint truncate" :title="r.path">{{ r.path }}</span>
+      <div class="grid">
+        <!-- 主列 -->
+        <main class="col" style="gap: var(--sp-4)">
+          <!-- 新建 -->
+          <section class="card card-pad col" style="gap: 12px">
+            <div class="row-between">
+              <span class="section-label">新建项目</span>
+              <span class="t-xs faint">一个项目 = 一个普通文件夹</span>
             </div>
-            <span class="t-xs faint row" style="gap: 4px">
-              <Clock :size="11" />
-              {{ fmtTime(r.openedAt).slice(0, 15) }}
-            </span>
-          </button>
-        </div>
-        <UiEmpty
-          v-else
-          :title="'还没有项目'"
-          hint="新建一个，或者打开一个已有目录"
-        >
-          <template #icon><FolderOpen :size="26" /></template>
-        </UiEmpty>
-      </section>
+            <div class="newrow">
+              <UiInput v-model="newName" size="md" placeholder="项目名，例如 示例短剧" @enter="create" />
+              <UiButton variant="outline" size="md" @click="pickParent">
+                <template #icon><FolderPlus :size="13" /></template>
+                位置
+              </UiButton>
+              <UiButton variant="primary" size="md" :loading="busy" @click="create">
+                创建并开始
+                <template #icon><ArrowRight :size="13" /></template>
+              </UiButton>
+            </div>
+            <div class="path t-xs faint truncate" :title="newParent">
+              {{ newParent || "还没有选择存放位置 —— 会在该位置创建同名目录" }}
+            </div>
+          </section>
 
-      <!-- 提示 -->
-      <section class="tips">
-        <div class="tip">
-          <div class="ticon" :class="{ warn: !hasModel }">
-            <KeyRound :size="14" />
-          </div>
-          <div class="col" style="gap: 3px">
-            <span class="t-sm" style="font-weight: 500">先配模型接口</span>
-            <span class="t-xs faint" style="line-height: 1.7">
-              文本模型支持 OpenAI 兼容端点与 Claude；生图 / 生视频在设置里有现成预设。
-              不配也能用，会用占位模型与占位素材把流程跑通。
-            </span>
-          </div>
-        </div>
-        <div class="tip">
-          <div class="ticon"><Zap :size="14" /></div>
-          <div class="col" style="gap: 3px">
-            <span class="t-sm" style="font-weight: 500">关于缓存</span>
-            <span class="t-xs faint" style="line-height: 1.7">
-              每个面板的对话都带着一份冻结的项目上下文，整场对话不变，
-              所以连续对话大部分输入都能命中服务端前缀缓存，成本低得多。
-            </span>
-          </div>
-        </div>
-        <div class="tip">
-          <div class="ticon"><Sparkles :size="14" /></div>
-          <div class="col" style="gap: 3px">
-            <span class="t-sm" style="font-weight: 500">让 Simon 动手</span>
-            <span class="t-xs faint" style="line-height: 1.7">
-              右下角的 Simon 能跨面板直接改数据：拆章节、写分镜、建资产、提交生成、铺时间线。
-              权限模式可以调，默认只有花钱的操作才问你。
-            </span>
-          </div>
-        </div>
-      </section>
+          <!-- 最近项目 -->
+          <section class="card col" style="gap: 0; overflow: hidden">
+            <div class="row-between card-pad" style="padding-bottom: 10px">
+              <span class="section-label">最近打开</span>
+              <span class="t-xs faint">{{ recents.length }} 个</span>
+            </div>
+            <div v-if="recents.length" class="recents">
+              <button v-for="r in recents" :key="r.path" class="recent" @click="openProject(r.path)">
+                <div class="corner"><Play :size="13" /></div>
+                <div class="col grow" style="gap: 1px; min-width: 0">
+                  <span class="rname truncate">{{ r.name }}</span>
+                  <span class="t-xs faint truncate" :title="r.path">{{ r.path }}</span>
+                </div>
+                <span class="t-xs faint row" style="gap: 4px; flex: 0 0 auto">
+                  <Clock :size="11" />
+                  {{ fmtTime(r.openedAt).slice(0, 11) }}
+                </span>
+              </button>
+            </div>
+            <UiEmpty v-else compact title="还没有项目" hint="新建一个，或者打开一个已有目录" />
+          </section>
+
+          <!-- 九步概览 -->
+          <section class="card card-pad col" style="gap: 12px">
+            <div class="row-between">
+              <span class="section-label">九个面板</span>
+              <span class="t-xs faint">左侧导航按这个顺序排，做到哪一步点哪一步</span>
+            </div>
+            <div class="steps">
+              <div v-for="(s, i) in FLOW" :key="s.name" class="step">
+                <span class="snum num">{{ i + 1 }}</span>
+                <div class="col" style="gap: 1px; min-width: 0">
+                  <span class="t-sm" style="font-weight: 500">{{ s.name }}</span>
+                  <span class="t-xs faint truncate">{{ s.desc }}</span>
+                </div>
+              </div>
+            </div>
+          </section>
+        </main>
+
+        <!-- 侧栏 -->
+        <aside class="col" style="gap: var(--sp-4)">
+          <section class="card card-pad col" style="gap: 10px">
+            <span class="section-label">开工前</span>
+
+            <div class="tip">
+              <div class="ticon" :class="{ warn: !hasModel }"><KeyRound :size="13" /></div>
+              <div class="col" style="gap: 2px; min-width: 0">
+                <span class="t-sm" style="font-weight: 500">配模型接口</span>
+                <span class="t-xs faint" style="line-height: 1.7">
+                  文本模型支持 OpenAI 兼容端点与 Claude；生图 / 生视频在设置里有现成模板。
+                  不配也能用 —— 占位模型与占位素材能把流程跑通。
+                </span>
+              </div>
+            </div>
+
+            <div class="tip">
+              <div class="ticon"><BookOpen :size="13" /></div>
+              <div class="col" style="gap: 2px; min-width: 0">
+                <span class="t-sm" style="font-weight: 500">装自己的知识包</span>
+                <span class="t-xs faint" style="line-height: 1.7">
+                  把自己的创作方法论、风格圣经放进「设置 → 知识包」，
+                  Simon 就会按它工作。正文按需读取，不吃缓存。
+                </span>
+              </div>
+            </div>
+          </section>
+
+          <section class="card card-pad col" style="gap: 10px">
+            <span class="section-label">两个要点</span>
+
+            <div class="tip">
+              <div class="ticon"><Zap :size="13" /></div>
+              <div class="col" style="gap: 2px; min-width: 0">
+                <span class="t-sm" style="font-weight: 500">缓存决定成本</span>
+                <span class="t-xs faint" style="line-height: 1.7">
+                  每个会话带着一份冻结的项目上下文，整场对话不变，所以连续对话大部分输入
+                  都按缓存价计费。
+                </span>
+              </div>
+            </div>
+
+            <div class="tip">
+              <div class="ticon"><Sparkles :size="13" /></div>
+              <div class="col" style="gap: 2px; min-width: 0">
+                <span class="t-sm" style="font-weight: 500">Simon 能跨面板动手</span>
+                <span class="t-xs faint" style="line-height: 1.7">
+                  它是共享上下文的助手：你说「把分镜写完然后建资产」，它会依次调用两个面板的工具。
+                </span>
+              </div>
+            </div>
+          </section>
+        </aside>
+      </div>
     </div>
   </div>
 </template>
@@ -193,166 +225,90 @@ async function browse() {
 <style scoped>
 .home {
   height: 100%;
-  background: radial-gradient(900px 420px at 50% -12%, var(--glow), transparent),
-    var(--bg);
+  background: radial-gradient(1100px 460px at 50% -14%, var(--glow), transparent), var(--bg);
 }
 .wrap {
-  max-width: 760px;
+  max-width: 1180px;
   margin: 0 auto;
-  padding: 72px var(--sp-6) 56px;
+  padding: var(--sp-6) var(--sp-6) var(--sp-8);
   display: flex;
   flex-direction: column;
-  gap: var(--sp-5);
+  gap: var(--sp-4);
+  min-height: 100%;
 }
 
-.hero {
+.bar {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 10px;
-  text-align: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  padding: var(--sp-2) 0 var(--sp-3);
 }
 .mark {
-  width: 52px;
-  height: 52px;
-  border-radius: 15px;
-  background: linear-gradient(145deg, #f5b155, #d98a24);
-  color: #1a1206;
+  width: 42px;
+  height: 42px;
+  border-radius: 13px;
+  background: linear-gradient(145deg, var(--accent), var(--accent-press));
+  color: var(--accent-fg);
   display: grid;
   place-items: center;
-  font-size: 24px;
+  font-size: 19px;
   font-weight: 700;
-  box-shadow: 0 8px 28px -8px rgba(240, 163, 61, 0.55);
-  margin-bottom: 4px;
+  box-shadow: var(--shadow);
+  flex: 0 0 auto;
 }
-.hero h1 {
-  font-size: var(--t-2xl);
+h1 {
+  font-size: var(--t-xl);
   font-weight: 650;
   letter-spacing: -0.01em;
 }
-.sub {
-  color: var(--fg-dim);
-  font-size: var(--t-md);
-}
-.flow {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 4px;
-  margin-top: 6px;
-}
-.chipx {
-  font-size: var(--t-xs);
-  color: var(--fg-faint);
-  background: var(--surface-3);
-  border: 1px solid var(--line);
-  border-radius: var(--r-sm);
-  padding: 2px 7px;
-}
-.arrow {
-  color: var(--fg-ghost);
-  margin: 0 2px;
-  vertical-align: middle;
-}
 
-.actions {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--sp-3);
-}
-.action {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 16px;
-  background: var(--surface-2);
-  border: 1px solid var(--line);
-  border-radius: var(--r-lg);
-  color: var(--fg-dim);
-  cursor: pointer;
-  text-align: left;
-  transition: border-color var(--fast), background var(--fast), transform var(--fast);
-}
-.action:hover {
-  background: var(--surface-3);
-  border-color: var(--line-strong);
-  color: var(--fg);
-  transform: translateY(-1px);
-}
-.action.on {
-  border-color: var(--accent-line);
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-.atitle {
-  font-size: var(--t-base);
-  font-weight: 600;
-}
-
-.createbox {
-  background: var(--surface-2);
-  border: 1px solid var(--line);
-  border-radius: var(--r-lg);
-  padding: var(--sp-4);
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-3);
-}
 .grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--sp-3);
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: var(--sp-4);
+  align-items: start;
 }
-.fld {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
+
+.newrow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: var(--sp-2);
 }
-.fld > span {
-  font-size: var(--t-sm);
-  color: var(--fg-dim);
-}
-.slide-enter-active,
-.slide-leave-active {
-  transition: opacity 180ms var(--ease), transform 180ms var(--ease);
-}
-.slide-enter-from,
-.slide-leave-to {
-  opacity: 0;
-  transform: translateY(-6px);
+.path {
+  padding: 6px 10px;
+  background: var(--surface-3);
+  border-radius: var(--r-sm);
 }
 
 .recents {
   display: flex;
   flex-direction: column;
-  gap: 6px;
 }
 .recent {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 12px 14px;
-  background: var(--surface-2);
-  border: 1px solid var(--line);
-  border-radius: var(--r-lg);
+  padding: 10px 16px;
+  background: none;
+  border: none;
+  border-top: 1px solid var(--line-faint);
   color: var(--fg);
   cursor: pointer;
   text-align: left;
-  transition: border-color var(--fast), background var(--fast);
+  transition: background var(--fast);
 }
 .recent:hover {
   background: var(--surface-3);
-  border-color: var(--line-strong);
 }
 .corner {
-  width: 34px;
-  height: 34px;
+  width: 30px;
+  height: 30px;
   flex: 0 0 auto;
-  border-radius: var(--r);
+  border-radius: var(--r-sm);
   display: grid;
   place-items: center;
-  background: var(--surface-3);
+  background: var(--surface-4);
   color: var(--fg-faint);
 }
 .recent:hover .corner {
@@ -364,32 +320,63 @@ async function browse() {
   font-weight: 500;
 }
 
-.tips {
+.steps {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: var(--sp-3);
-  margin-top: var(--sp-2);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
 }
+.step {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  background: var(--surface-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  min-width: 0;
+}
+.snum {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  border-radius: var(--r-sm);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 10px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--accent-line);
+}
+@media (max-width: 1180px) {
+  .steps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 .tip {
   display: flex;
-  gap: 10px;
-  padding: var(--sp-3);
-  background: var(--surface-2);
-  border: 1px solid var(--line);
-  border-radius: var(--r-lg);
+  gap: 9px;
+  align-items: flex-start;
 }
 .ticon {
-  width: 26px;
-  height: 26px;
+  width: 24px;
+  height: 24px;
   flex: 0 0 auto;
   border-radius: 7px;
   display: grid;
   place-items: center;
-  background: var(--surface-3);
+  background: var(--surface-4);
   color: var(--fg-faint);
+  margin-top: 1px;
 }
 .ticon.warn {
   background: var(--warn-soft);
   color: var(--warn);
+}
+
+@media (max-width: 1000px) {
+  .grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 </style>

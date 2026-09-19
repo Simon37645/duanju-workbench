@@ -14,11 +14,13 @@ pub mod config;
 pub mod error;
 pub mod gen;
 pub mod jobs;
+pub mod knowledge;
 pub mod llm;
 pub mod media;
 pub mod models;
 pub mod net;
 pub mod presets;
+pub mod proc;
 pub mod progress;
 pub mod project;
 pub mod selftest;
@@ -121,6 +123,14 @@ pub fn run() {
             commands::provider_set_secret,
             commands::secrets_status,
             commands::provider_test,
+            // 知识包
+            commands::knowledge_list,
+            commands::knowledge_read,
+            commands::knowledge_import,
+            commands::knowledge_delete,
+            commands::knowledge_set_enabled,
+            commands::knowledge_open_dir,
+            commands::knowledge_save,
             commands::proxy_status,
             commands::net_test,
             // 媒体 / ASR

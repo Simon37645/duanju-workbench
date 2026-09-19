@@ -41,6 +41,11 @@ pub fn read_text_opt(path: &Path) -> Result<Option<String>> {
     Ok(Some(fs::read_to_string(path)?))
 }
 
+/// 读文本，文件不存在返回 None（与 read_text_or_empty 区分开）
+pub fn read_text_optional(path: &Path) -> Result<Option<String>> {
+    read_text_opt(path)
+}
+
 pub fn read_text_or_empty(path: &Path) -> Result<String> {
     Ok(read_text_opt(path)?.unwrap_or_default())
 }

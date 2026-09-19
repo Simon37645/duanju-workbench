@@ -672,6 +672,71 @@ pub async fn settings_set(state: State<'_, AppState>, settings: AppSettings) -> 
     Ok(settings)
 }
 
+/* ================================================================ 知识包 */
+
+#[tauri::command]
+pub async fn knowledge_list(state: State<'_, AppState>) -> Result<Vec<crate::knowledge::KnowledgePack>> {
+    crate::knowledge::ensure_defaults(&state)?;
+    Ok(crate::knowledge::list(&state))
+}
+
+#[tauri::command]
+pub async fn knowledge_read(state: State<'_, AppState>, id: String) -> Result<String> {
+    crate::knowledge::read(&state, &id)
+}
+
+#[tauri::command]
+pub async fn knowledge_import(state: State<'_, AppState>, paths: Vec<String>) -> Result<Vec<String>> {
+    let added = crate::knowledge::import(&state, &paths)?;
+    state.reset_agent_prefix();
+    Ok(added)
+}
+
+#[tauri::command]
+pub async fn knowledge_delete(state: State<'_, AppState>, id: String) -> Result<()> {
+    crate::knowledge::delete(&state, &id)?;
+    state.reset_agent_prefix();
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn knowledge_set_enabled(
+    state: State<'_, AppState>,
+    id: String,
+    enabled: bool,
+) -> Result<()> {
+    crate::knowledge::set_enabled(&state, &id, enabled)?;
+    state.reset_agent_prefix();
+    Ok(())
+}
+
+/// 直接写入正文（内置编辑器保存用）。id 为空表示新建。
+#[tauri::command]
+pub async fn knowledge_save(
+    state: State<'_, AppState>,
+    id: String,
+    body: String,
+) -> Result<String> {
+    let dir = crate::knowledge::knowledge_dir(&state);
+    crate::store::ensure_dir(&dir)?;
+    let name = if id.trim().is_empty() {
+        format!("未命名-{}", crate::models::new_id("kb").replace("kb_", ""))
+    } else {
+        id.trim().to_string()
+    };
+    let path = dir.join(format!("{name}.md"));
+    crate::store::write_text(&path, &body)?;
+    state.reset_agent_prefix();
+    Ok(name)
+}
+
+#[tauri::command]
+pub async fn knowledge_open_dir(state: State<'_, AppState>) -> Result<String> {
+    let dir = crate::knowledge::knowledge_dir(&state);
+    crate::store::ensure_dir(&dir)?;
+    Ok(dir.to_string_lossy().to_string())
+}
+
 /* ============================================================== 网络诊断 */
 
 #[tauri::command]
@@ -874,7 +939,7 @@ pub async fn agent_session_new(
     let s = AgentSession::new(
         &p.manifest.id,
         panel,
-        agent::prompt::build_frozen_prefix(&p, panel)?,
+        agent::prompt::build_frozen_prefix(&p, panel, crate::knowledge::prompt_index(&state))?,
     );
     state.put_session(s.clone());
     Ok(s)
@@ -932,7 +997,7 @@ pub async fn agent_prefix_preview(
     session_id: Option<String>,
 ) -> Result<agent::prompt::PrefixReport> {
     let p = state.current()?;
-    let live = agent::prompt::build_frozen_prefix(&p, panel)?;
+    let live = agent::prompt::build_frozen_prefix(&p, panel, crate::knowledge::prompt_index(&state))?;
     let stable = session_id
         .as_deref()
         .and_then(|id| state.session(id))

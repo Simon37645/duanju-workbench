@@ -436,6 +436,8 @@ export interface LlmProviderConfig extends ProviderConfig {
 
 export interface AppSettings {
   theme: "dark" | "light";
+  /** 新手教程是否已经走过 */
+  onboarded: boolean;
   workspacePanelWidth: number;
   agentDockWidth: number;
   agentDockOpen: boolean;
@@ -501,4 +503,20 @@ export interface WhisperModelInfo {
   downloaded: boolean;
   path: string | null;
   multilingual: boolean;
+}
+
+/* ------------------------------------------------------------- 知识包 */
+
+export type KnowledgeKind = "methodology" | "style" | "checklist" | "reference" | string;
+
+export interface KnowledgePack {
+  id: string;
+  name: string;
+  kind: KnowledgeKind;
+  summary: string;
+  enabled: boolean;
+  path: string;
+  chars: number;
+  /** 解析后的正文（不含 frontmatter） */
+  body: string;
 }

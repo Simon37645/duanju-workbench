@@ -39,7 +39,7 @@ function statusIcon(j: Job) {
 </script>
 
 <template>
-  <div class="bar" :class="{ open: jobs.barOpen }">
+  <div class="bar" data-tour="jobs" :class="{ open: jobs.barOpen }">
     <button class="head" @click="jobs.barOpen = !jobs.barOpen">
       <div class="row grow" style="gap: 10px; min-width: 0">
         <span class="section-label">任务</span>

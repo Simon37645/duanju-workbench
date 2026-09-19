@@ -12,6 +12,7 @@ import UiTextarea from "@/ui/Textarea.vue";
 import UiModal from "@/ui/Modal.vue";
 import UiSegmented from "@/ui/Segmented.vue";
 import UiSpinner from "@/ui/Spinner.vue";
+import KnowledgePanel from "@/components/KnowledgePanel.vue";
 import { toast } from "@/ui";
 import { api, errorText } from "@/api/ipc";
 import { openPath } from "@tauri-apps/plugin-opener";
@@ -107,6 +108,7 @@ const MODE_HINT: Record<string, string> = {
 
 const TABS = [
   { label: "模型供应商", value: "providers" },
+  { label: "知识包", value: "knowledge" },
   { label: "字幕与显卡", value: "asr" },
   { label: "运行环境", value: "runtime" },
 ];
@@ -217,6 +219,12 @@ async function test(p: ProviderConfig) {
 async function setAsr(patch: Record<string, unknown>) {
   await settings.save(patch as never);
   asr.value = await api.asrCapabilities();
+}
+
+async function restartTour() {
+  await settings.save({ onboarded: false });
+  emit("update:show", false);
+  toast.info("关掉设置后会重新弹出新手教程");
 }
 
 async function testNet(url?: string) {
@@ -368,6 +376,11 @@ const asrBackendOptions = computed(() => [
             <UiButton variant="primary" @click="save">保存</UiButton>
           </div>
         </div>
+      </template>
+
+      <!-- ====================================================== 知识包 -->
+      <template v-else-if="tab === 'knowledge'">
+        <KnowledgePanel />
       </template>
 
       <!-- ======================================================== 字幕 -->
@@ -536,6 +549,16 @@ const asrBackendOptions = computed(() => [
             <UiField label="ffprobe 路径">
               <UiInput :model-value="settings.settings?.ffprobePath" placeholder="留空用内置 sidecar" @update:model-value="(v: string) => settings.save({ ffprobePath: v })" />
             </UiField>
+          </div>
+
+          <div class="card card-pad col" style="gap: 12px">
+            <span class="section-label">新手教程</span>
+            <div class="row-between">
+              <span class="t-xs faint" style="line-height: 1.7">
+                第一次使用时自动弹出，随时可以重看一遍
+              </span>
+              <UiButton variant="outline" size="sm" @click="restartTour">重新过一遍</UiButton>
+            </div>
           </div>
 
           <div class="card card-pad col" style="gap: 12px">

@@ -54,6 +54,15 @@ impl AppState {
         self.jobs.attach_app(app);
     }
 
+    /// 知识包一改，所有会话的冻结前缀就过期了，下一轮重建。
+    /// 代价是一次缓存失效 —— 但内容确实变了，这是必须付的。
+    pub fn reset_agent_prefix(&self) {
+        for s in self.agent.sessions.write().values_mut() {
+            s.prefix = None;
+        }
+        self.persist_sessions();
+    }
+
     pub fn emit_changed(&self) {
         if let Some(app) = self.app.read().clone() {
             let _ = app.emit(EVENT_PROJECT_CHANGED, ());
@@ -106,9 +115,10 @@ impl AppState {
         Ok(c)
     }
 
-    /// 代理设置变了之后要丢掉缓存的客户端，下次请求才会用新代理。
+    /// 代理设置变了之后要丢掉缓存的客户端与系统代理探测结果。
     pub fn reset_http(&self) {
         *self.http.write() = None;
+        crate::net::refresh_system_proxy();
     }
 
     /* ------------------------------------------------------------ 项目 */

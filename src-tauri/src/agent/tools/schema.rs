@@ -301,6 +301,10 @@ pub fn asset_generate_missing() -> Value {
     )
 }
 
+pub fn knowledge_read() -> Value {
+    obj(json!({ "id": s("知识包 id，先用 knowledge_list 拿") }), &["id"])
+}
+
 pub fn ask_user() -> Value {
     obj(
         json!({

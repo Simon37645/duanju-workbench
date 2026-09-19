@@ -189,6 +189,16 @@ export const api = {
   secretsStatus: () => invoke<Record<string, boolean>>("secrets_status"),
   providerTest: (providerId: string) => invoke<string>("provider_test", { providerId }),
 
+  /* ---------------------------------------------------------- 知识包 */
+  knowledgeList: () => invoke<import("@/types/models").KnowledgePack[]>("knowledge_list"),
+  knowledgeRead: (id: string) => invoke<string>("knowledge_read", { id }),
+  knowledgeImport: (paths: string[]) => invoke<string[]>("knowledge_import", { paths }),
+  knowledgeDelete: (id: string) => invoke<void>("knowledge_delete", { id }),
+  knowledgeSetEnabled: (id: string, enabled: boolean) =>
+    invoke<void>("knowledge_set_enabled", { id, enabled }),
+  knowledgeOpenDir: () => invoke<string>("knowledge_open_dir"),
+  knowledgeSave: (id: string, body: string) => invoke<string>("knowledge_save", { id, body }),
+
   /* -------------------------------------------------------- 网络诊断 */
   proxyStatus: () =>
     invoke<{

@@ -33,6 +33,8 @@ pub const READ_ONLY_TOOLS: &[&str] = &[
     "asset_view_image",
     "file_view_image",
     "ask_user",
+    "knowledge_list",
+    "knowledge_read",
 ];
 
 pub fn is_read_only(name: &str) -> bool {
@@ -1139,6 +1141,42 @@ async fn t_asset_generate_missing(ctx: ToolCtx, args: Value) -> Result<ToolOutco
     ))
 }
 
+/* ========================== 用户知识包 ========================== */
+
+async fn t_knowledge_list(ctx: ToolCtx, _args: Value) -> Result<ToolOutcome> {
+    let packs = crate::knowledge::list(&ctx.state);
+    if packs.is_empty() {
+        return Ok(ToolOutcome::text(
+            "用户还没有装知识包。可以在「设置 → 知识包」里导入 Markdown。",
+        ));
+    }
+    let items: Vec<Value> = packs
+        .iter()
+        .map(|p| {
+            json!({
+                "id": p.id, "name": p.name, "kind": p.kind,
+                "summary": p.summary, "chars": p.chars, "enabled": p.enabled,
+            })
+        })
+        .collect();
+    Ok(ToolOutcome::new(
+        format!("共 {} 个知识包", items.len()),
+        json!(items),
+    ))
+}
+
+async fn t_knowledge_read(ctx: ToolCtx, args: Value) -> Result<ToolOutcome> {
+    let id = arg_str(&args, "id")?;
+    let body = crate::knowledge::read(&ctx.state, &id)?;
+    let chars = body.chars().count();
+    // 太长的包分片给，避免一次撑爆上下文
+    let text: String = body.chars().take(60000).collect();
+    Ok(ToolOutcome::new(
+        format!("已读取知识包「{id}」（{chars} 字）"),
+        json!({ "id": id, "chars": chars, "truncated": chars > 60000, "body": text }),
+    ))
+}
+
 /* ============================ 提问 ============================ */
 
 /// 占位实现。真正的「挂起等人回答」在 agent 的 run loop 里做 ——
@@ -1820,6 +1858,22 @@ pub fn registry(_panel: PanelId) -> Vec<Tool> {
             schema::checklist_toggle(),
             false,
             t_checklist_toggle
+        ),
+        tool!(
+            "knowledge_list",
+            "列出知识包",
+            "列出用户装的知识包（名称、类型、摘要、字数）。用户说「按我的体系来」时先用它看看有什么。",
+            schema::empty(),
+            false,
+            t_knowledge_list
+        ),
+        tool!(
+            "knowledge_read",
+            "读取知识包正文",
+            "读取某个知识包的完整正文。**只在真正要用的时候读** —— 正文可能几万字，读进来会占上下文。",
+            schema::knowledge_read(),
+            false,
+            t_knowledge_read
         ),
         tool!(
             "ask_user",

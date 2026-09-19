@@ -670,6 +670,8 @@ pub const DEFAULT_WHISPER_BASE_URL: &str =
 #[serde(rename_all = "camelCase", default)]
 pub struct AppSettings {
     pub theme: String,
+    /// 新手教程是否已经走过
+    pub onboarded: bool,
     pub workspace_panel_width: u32,
     pub agent_dock_width: u32,
     pub agent_dock_open: bool,
@@ -706,6 +708,7 @@ impl Default for AppSettings {
     fn default() -> Self {
         Self {
             theme: "dark".into(),
+            onboarded: false,
             workspace_panel_width: 260,
             agent_dock_width: 420,
             agent_dock_open: true,

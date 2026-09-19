@@ -113,7 +113,7 @@ async function closeProject() {
     </div>
 
     <!-- 右：全局控制 -->
-    <div class="row" style="gap: 6px; flex: 0 0 auto">
+    <div class="row" data-tour="model" style="gap: 6px; flex: 0 0 auto">
       <!-- 缓存 -->
       <UiPopover :width="330" placement="bottom-end">
         <template #trigger>

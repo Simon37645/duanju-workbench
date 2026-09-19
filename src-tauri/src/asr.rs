@@ -87,35 +87,28 @@ fn nvidia_probe() -> (bool, Option<String>, Option<String>) {
     CACHE
         .get_or_init(|| {
             // CUDA toolkit
+            // 注意：这些探测会起子进程，必须走 proc::hidden，
+            // 否则在 Windows 上打开设置面板会闪好几个控制台黑框。
             let mut cuda_version = None;
             let nvcc = if cfg!(windows) { "nvcc.exe" } else { "nvcc" };
-            if let Ok(out) = std::process::Command::new(nvcc).arg("--version").output() {
-                if out.status.success() {
-                    let s = String::from_utf8_lossy(&out.stdout);
-                    if let Some(line) = s.lines().find(|l| l.contains("release")) {
-                        let v = line
-                            .split("release")
-                            .nth(1)
-                            .map(|x| x.trim().trim_end_matches(',').to_string());
-                        cuda_version = v;
-                    }
+            if let Some(s) = crate::proc::output_text(nvcc, &["--version"]) {
+                if let Some(line) = s.lines().find(|l| l.contains("release")) {
+                    cuda_version = line
+                        .split("release")
+                        .nth(1)
+                        .map(|x| x.trim().trim_end_matches(',').to_string());
                 }
             }
-            // 显卡
             let smi = if cfg!(windows) { "nvidia-smi.exe" } else { "nvidia-smi" };
             let mut gpu = None;
             let mut has_smi = false;
-            if let Ok(out) = std::process::Command::new(smi)
-                .args(["--query-gpu=name", "--format=csv,noheader"])
-                .output()
+            if let Some(s) =
+                crate::proc::output_text(smi, &["--query-gpu=name", "--format=csv,noheader"])
             {
-                if out.status.success() {
-                    has_smi = true;
-                    let s = String::from_utf8_lossy(&out.stdout);
-                    let first = s.lines().next().unwrap_or("").trim().to_string();
-                    if !first.is_empty() {
-                        gpu = Some(first);
-                    }
+                has_smi = true;
+                let first = s.lines().next().unwrap_or("").trim().to_string();
+                if !first.is_empty() {
+                    gpu = Some(first);
                 }
             }
             let available = has_smi || cuda_version.is_some();

@@ -82,7 +82,7 @@ function go(id: PanelId) {
     </div>
 
     <!-- 流程导航 -->
-    <nav class="nav scroll">
+    <nav class="nav scroll side-nav">
       <UiTooltip
         v-for="row in rows"
         :key="row.id"

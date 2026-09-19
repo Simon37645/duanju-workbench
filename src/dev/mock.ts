@@ -237,7 +237,7 @@ const jobs: Job[] = [
 ];
 
 const settings: AppSettings = {
-  theme: "dark", workspacePanelWidth: 240, agentDockWidth: 400, agentDockOpen: true,
+  theme: "dark", onboarded: true, workspacePanelWidth: 240, agentDockWidth: 400, agentDockOpen: true,
   agentMode: "auto", maxToolRounds: 12,
   proxyMode: "auto", proxyUrl: "",
   asrBackend: "auto", asrUseGpu: true, asrGpuLayers: 999, asrThreads: 0,
@@ -395,6 +395,29 @@ export async function mockInvoke(cmd: string, args?: Record<string, unknown>): P
         cameraMoves: ["固定", "横移", "推近", "拉远", "摇摄", "跟随", "升降", "环绕", "手持", "变焦"],
         timeOfDay: ["清晨", "白天", "黄昏", "夜晚", "深夜", "不限"],
       };
+    case "knowledge_list":
+      return [
+        {
+          id: "QCH 视觉创作体系", name: "QCH 视觉创作体系", kind: "methodology",
+          summary: "五层创作架构：AI 视觉总监身份、视觉 DNA 十模块、Prompt 模块库、七项自检标准",
+          enabled: true, path: "C:/demo/knowledge/QCH 视觉创作体系.md", chars: 7883,
+          body: "# QCH 个人 AIGC 视觉创作体系\n\n（示例正文）",
+        },
+        {
+          id: "QCH STYLE BIBLE V1.0", name: "QCH STYLE BIBLE V1.0", kind: "style",
+          summary: "风格圣经：审美宣言、情绪/色彩/光影/材质/人物/环境六大系统",
+          enabled: true, path: "C:/demo/knowledge/QCH_STYLE_BIBLE_V1.0.md", chars: 14132,
+          body: "# QCH STYLE BIBLE\n\n（示例正文）",
+        },
+        {
+          id: "我的自检清单", name: "我的自检清单", kind: "checklist",
+          summary: "交片前必过的 7 条",
+          enabled: false, path: "C:/demo/knowledge/我的自检清单.md", chars: 320,
+          body: "- [ ] 画面里没有多余手指\n- [ ] 人物特征前后一致",
+        },
+      ];
+    case "knowledge_open_dir":
+      return "C:/Users/demo/AppData/Roaming/com.duanju.workbench/knowledge";
     case "asr_capabilities":
       return asrCaps;
     case "media_sidecar_status":

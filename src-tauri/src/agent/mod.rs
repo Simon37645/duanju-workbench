@@ -235,7 +235,7 @@ pub async fn run_turn(
         _ => AgentSession::new(
             &project.manifest.id,
             opts.panel,
-            prompt::build_frozen_prefix(&project, opts.panel)?,
+            prompt::build_frozen_prefix(&project, opts.panel, knowledge_index(&state))?,
         ),
     };
 
@@ -247,7 +247,11 @@ pub async fn run_turn(
         .map(|m| m != model)
         .unwrap_or(false);
     if session.prefix.is_none() || opts.refresh_context || model_changed {
-        session.prefix = Some(prompt::build_frozen_prefix(&project, opts.panel)?);
+        session.prefix = Some(prompt::build_frozen_prefix(
+            &project,
+            opts.panel,
+            knowledge_index(&state),
+        )?);
     }
     let prefix = session.prefix.clone().unwrap();
 
@@ -762,6 +766,11 @@ pub fn resolve_approval(state: &AppState, call_id: &str, approved: bool) -> bool
     } else {
         false
     }
+}
+
+/// 当前用户装的知识包索引（只含启用中的）
+fn knowledge_index(state: &AppState) -> String {
+    crate::knowledge::prompt_index(state)
 }
 
 fn resolve_provider(state: &AppState) -> Result<ProviderHandle> {

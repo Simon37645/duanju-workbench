@@ -3,6 +3,7 @@ import { onMounted, watch } from "vue";
 import { useRouter } from "vue-router";
 import ToastHost from "@/ui/ToastHost.vue";
 import ConfirmHost from "@/ui/ConfirmHost.vue";
+import TourOverlay from "@/components/TourOverlay.vue";
 import { useSettingsStore } from "@/stores/settings";
 import { useJobsStore } from "@/stores/jobs";
 import { useProjectStore } from "@/stores/project";
@@ -37,4 +38,5 @@ onMounted(async () => {
   <router-view />
   <ToastHost />
   <ConfirmHost />
+  <TourOverlay />
 </template>

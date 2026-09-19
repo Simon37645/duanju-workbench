@@ -36,22 +36,14 @@ fn env_proxy() -> Option<String> {
 }
 
 #[cfg(windows)]
-fn windows_system_proxy() -> Option<String> {
+fn probe_windows_proxy() -> Option<String> {
     let key = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings";
-    let enabled = std::process::Command::new("reg")
-        .args(["query", key, "/v", "ProxyEnable"])
-        .output()
-        .ok()
-        .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+    let enabled = crate::proc::output_text("reg", &["query", key, "/v", "ProxyEnable"])
         .filter(|s| s.contains("0x1"));
     if enabled.is_none() {
         return None;
     }
-    let out = std::process::Command::new("reg")
-        .args(["query", key, "/v", "ProxyServer"])
-        .output()
-        .ok()?;
-    let text = String::from_utf8_lossy(&out.stdout).to_string();
+    let text = crate::proc::output_text("reg", &["query", key, "/v", "ProxyServer"])?;
     let raw = text
         .lines()
         .find(|l| l.contains("ProxyServer"))?
@@ -76,9 +68,8 @@ fn windows_system_proxy() -> Option<String> {
 }
 
 #[cfg(target_os = "macos")]
-fn macos_system_proxy() -> Option<String> {
-    let out = std::process::Command::new("scutil").arg("--proxy").output().ok()?;
-    let text = String::from_utf8_lossy(&out.stdout);
+fn probe_macos_proxy() -> Option<String> {
+    let text = crate::proc::output_text("scutil", &["--proxy"])?;
     let enabled = text.contains("HTTPSEnable : 1") || text.contains("HTTPEnable : 1");
     if !enabled {
         return None;
@@ -104,7 +95,7 @@ fn macos_system_proxy() -> Option<String> {
 }
 
 #[cfg(not(any(windows, target_os = "macos")))]
-fn macos_system_proxy() -> Option<String> {
+fn probe_macos_proxy() -> Option<String> {
     None
 }
 
@@ -114,6 +105,38 @@ fn ensure_scheme(s: &str) -> String {
         t.to_string()
     } else {
         format!("http://{t}")
+    }
+}
+
+/// 系统代理只探一次并缓存。
+///
+/// 不缓存的话，打开一次设置面板会触发多次 `diagnostics()`，
+/// 每次都去查注册表 —— 在 Windows 上就是好几次黑框闪过。
+static SYSTEM_PROXY: parking_lot::RwLock<Option<Option<String>>> =
+    parking_lot::RwLock::new(None);
+
+pub fn system_proxy() -> Option<String> {
+    if let Some(v) = SYSTEM_PROXY.read().clone() {
+        return v;
+    }
+    let v = probe_system_proxy();
+    *SYSTEM_PROXY.write() = Some(v.clone());
+    v
+}
+
+/// 设置里改过代理之后调用，下次重新探测。
+pub fn refresh_system_proxy() {
+    *SYSTEM_PROXY.write() = None;
+}
+
+fn probe_system_proxy() -> Option<String> {
+    #[cfg(windows)]
+    {
+        probe_windows_proxy()
+    }
+    #[cfg(not(windows))]
+    {
+        probe_macos_proxy()
     }
 }
 
@@ -133,17 +156,6 @@ pub fn resolve_proxy(settings: &AppSettings) -> Option<String> {
         _ => env_proxy()
             .map(|s| ensure_scheme(&s))
             .or_else(system_proxy),
-    }
-}
-
-pub fn system_proxy() -> Option<String> {
-    #[cfg(windows)]
-    {
-        windows_system_proxy()
-    }
-    #[cfg(not(windows))]
-    {
-        macos_system_proxy()
     }
 }
 
@@ -174,12 +186,13 @@ pub fn build_client(timeout_sec: u64, proxy: Option<&str>) -> Result<reqwest::Cl
 
 /// 诊断信息，给设置面板显示用。
 pub fn diagnostics(settings: &AppSettings) -> serde_json::Value {
+    let effective = resolve_proxy(settings);
     serde_json::json!({
         "mode": settings.proxy_mode,
         "manualUrl": settings.proxy_url,
         "envProxy": env_proxy(),
         "systemProxy": system_proxy(),
-        "effective": resolve_proxy(settings),
+        "effective": effective,
         "noProxy": NO_PROXY,
     })
 }

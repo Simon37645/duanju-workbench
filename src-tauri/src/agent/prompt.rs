@@ -32,6 +32,7 @@ pub const LAYER_CORE: &str = "L0 核心指令";
 pub const LAYER_PANEL: &str = "L1 工作台职责";
 pub const LAYER_BIBLE: &str = "L2 项目圣经";
 pub const LAYER_ASSETS: &str = "L3 资产索引";
+pub const LAYER_KNOWLEDGE: &str = "L4 知识包索引";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -132,8 +133,12 @@ pub fn est_tokens(s: &str) -> u64 {
 /// 注意：**不再按面板分叉**。agent 是一个共享上下文的助手，可以操作任意面板，
 /// 所以 L1 一次性写清九个面板的规范。当前在哪个面板属于易变信息，放在上下文快照里，
 /// 这样切换面板不会让前缀失效 —— 反而比按面板分叉时缓存命中更稳。
-pub fn build_frozen_prefix(project: &Project, panel: PanelId) -> Result<FrozenPrefix> {
-    let layers = vec![
+pub fn build_frozen_prefix(
+    project: &Project,
+    panel: PanelId,
+    knowledge_index: String,
+) -> Result<FrozenPrefix> {
+    let mut layers = vec![
         Layer {
             name: LAYER_CORE.into(),
             text: core_prompt(),
@@ -155,6 +160,14 @@ pub fn build_frozen_prefix(project: &Project, panel: PanelId) -> Result<FrozenPr
             cache: true,
         },
     ];
+    // 知识包只放索引；正文由 agent 用工具按需读取，避免每轮都为几万字付费
+    if !knowledge_index.trim().is_empty() {
+        layers.push(Layer {
+            name: LAYER_KNOWLEDGE.into(),
+            text: knowledge_index,
+            cache: true,
+        });
+    }
     let context = context_snapshot(project, panel);
     let joined = format!(
         "{}\n\n===CONTEXT===\n{}",

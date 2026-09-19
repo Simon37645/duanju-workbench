@@ -158,7 +158,7 @@ onMounted(() => {
 
 <template>
   <!-- 悬浮按钮 -->
-  <button v-if="!open" class="fab" :class="{ busy: agent.running }" @click="open = true">
+  <button v-if="!open" class="fab" data-tour="simon" :class="{ busy: agent.running }" @click="open = true">
     <Sparkles :size="18" />
     <span v-if="hasUnread" class="fabdot" />
     <span class="fabtip">Simon</span>
