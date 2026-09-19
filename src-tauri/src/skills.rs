@@ -286,16 +286,21 @@ pub fn delete(state: &AppState, id: &str) -> Result<()> {
     save_flags(state, &flags)
 }
 
-/// 导入技能。支持三种入参：
+/// 导入技能。支持四种入参：
 /// - 带 `SKILL.md` 的目录 → 整个目录拷进来
 /// - 单个 `.md` → 作为单文件技能
-/// - 其它目录 → 当作「技能合集」批量扫描其子目录
+/// - 其它目录 → 当作「技能合集」批量扫描
+/// - `.zip` → 解压后扫描里面的所有技能（合集包通常就是这个形态）
 pub fn import(state: &AppState, paths: &[String]) -> Result<Vec<String>> {
     let dir = skills_dir(state);
     store::ensure_dir(&dir)?;
     let mut added = vec![];
     for raw in paths {
         let src = Path::new(raw);
+        if src.is_file() && src.extension().and_then(|e| e.to_str()).map(|e| e.eq_ignore_ascii_case("zip")).unwrap_or(false) {
+            added.extend(import_zip(&dir, src)?);
+            continue;
+        }
         if src.is_dir() {
             if src.join(SKILL_FILE).is_file() {
                 added.push(copy_skill_dir(src, &dir)?);
@@ -327,10 +332,147 @@ pub fn import(state: &AppState, paths: &[String]) -> Result<Vec<String>> {
     }
     if added.is_empty() {
         return Err(AppError::invalid(
-            "没有导入任何技能。支持：带 SKILL.md 的目录、单个 .md、或装着多个技能的合集目录",
+            "没有导入任何技能。支持：.zip 压缩包、带 SKILL.md 的目录、单个 .md、或装着多个技能的合集目录",
         ));
     }
     Ok(added)
+}
+
+/* ------------------------------------------------------------ zip 导入 */
+
+/// 解压一个 zip，把里面的技能全部收进来。
+///
+/// 压缩包通常长这样，所以不能只看根目录：
+/// ```text
+/// 剧本skill合集/
+///   节奏检查/SKILL.md
+///   钩子设计/SKILL.md
+///   README.md
+/// ```
+fn import_zip(dest_root: &Path, zip_path: &Path) -> Result<Vec<String>> {
+    let tmp = dest_root.join(format!(".unzip-{}", crate::models::new_id("z")));
+    store::ensure_dir(&tmp)?;
+    let result = (|| -> Result<Vec<String>> {
+        extract_zip(zip_path, &tmp)?;
+        Ok(import_tree(&tmp, dest_root))
+    })();
+    let _ = std::fs::remove_dir_all(&tmp);
+    result
+}
+
+fn extract_zip(zip_path: &Path, out: &Path) -> Result<()> {
+    let file = std::fs::File::open(zip_path)?;
+    let mut archive = zip::ZipArchive::new(file)
+        .map_err(|e| AppError::invalid(format!("压缩包打不开：{e}")))?;
+    for i in 0..archive.len() {
+        let mut entry = archive
+            .by_index(i)
+            .map_err(|e| AppError::invalid(format!("压缩包第 {i} 项损坏：{e}")))?;
+        // enclosed_name() 会自动挡掉 ../ 与绝对路径（zip-slip）
+        let Some(rel) = entry.enclosed_name() else {
+            continue;
+        };
+        let target = out.join(&rel);
+        if entry.is_dir() {
+            store::ensure_dir(&target)?;
+            continue;
+        }
+        if let Some(parent) = target.parent() {
+            store::ensure_dir(parent)?;
+        }
+        let mut f = std::fs::File::create(&target)?;
+        std::io::copy(&mut entry, &mut f)?;
+    }
+    Ok(())
+}
+
+/// 在解压出来的树里找技能：先收所有 SKILL.md 所在的目录，
+/// 再把散落的 .md 当单文件技能。嵌套的技能目录只保留最外层。
+fn import_tree(root: &Path, dest_root: &Path) -> Vec<String> {
+    let mut skill_dirs: Vec<PathBuf> = vec![];
+    find_skill_dirs(root, 0, &mut skill_dirs);
+
+    let mut added = vec![];
+    for d in &skill_dirs {
+        let name = d
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| "skill".into());
+        let dest = unique_path(dest_root, &name, "dir");
+        if copy_dir_all(d, &dest).is_ok() {
+            added.push(name);
+        }
+    }
+
+    // 散落的单文件（不在任何技能目录里）
+    let mut loose: Vec<PathBuf> = vec![];
+    find_loose_md(root, 0, &skill_dirs, &mut loose);
+    for f in loose {
+        let stem = f
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_default();
+        if stem.is_empty() {
+            continue;
+        }
+        let dest = unique_path(dest_root, &stem, "md");
+        if std::fs::copy(&f, &dest).is_ok() {
+            added.push(stem);
+        }
+    }
+    added
+}
+
+fn skip_name(name: &str) -> bool {
+    name.starts_with('.') || name.starts_with('_') || name == "__MACOSX"
+}
+
+fn find_skill_dirs(dir: &Path, depth: usize, out: &mut Vec<PathBuf>) {
+    if depth > 6 {
+        return;
+    }
+    if dir.join(SKILL_FILE).is_file() {
+        out.push(dir.to_path_buf());
+        return; // 不再往里找，嵌套的忽略
+    }
+    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    for e in rd.flatten() {
+        let p = e.path();
+        let name = e.file_name().to_string_lossy().to_string();
+        if p.is_dir() && !skip_name(&name) {
+            find_skill_dirs(&p, depth + 1, out);
+        }
+    }
+}
+
+fn find_loose_md(dir: &Path, depth: usize, skill_dirs: &[PathBuf], out: &mut Vec<PathBuf>) {
+    if depth > 2 {
+        return;
+    }
+    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    for e in rd.flatten() {
+        let p = e.path();
+        let name = e.file_name().to_string_lossy().to_string();
+        if skip_name(&name) {
+            continue;
+        }
+        if p.is_dir() {
+            // 技能目录内部的文件不算散落
+            if skill_dirs.iter().any(|d| p.starts_with(d)) {
+                continue;
+            }
+            find_loose_md(&p, depth + 1, skill_dirs, out);
+        } else {
+            let ext = p
+                .extension()
+                .and_then(|x| x.to_str())
+                .unwrap_or("")
+                .to_ascii_lowercase();
+            if (ext == "md" || ext == "markdown") && !skill_dirs.iter().any(|d| p.starts_with(d)) {
+                out.push(p);
+            }
+        }
+    }
 }
 
 fn copy_skill_dir(src: &Path, dest_root: &Path) -> Result<String> {

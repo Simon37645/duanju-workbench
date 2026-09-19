@@ -231,6 +231,34 @@ pub async fn run_list_skills() -> i32 {
     0
 }
 
+/// 命令行导入技能（zip / 目录 / md 都行），不用打开界面：
+/// ```bash
+/// cargo run -- --import-skill D:/下载/剧本skill合集.zip
+/// ```
+pub async fn run_import_skills(paths: &[String]) -> i32 {
+    let dir = crate::config::default_config_dir();
+    let state = AppState::new(dir);
+    let _ = crate::skills::ensure_defaults(&state);
+    println!("
+=== 导入技能 ===
+");
+    match crate::skills::import(&state, paths) {
+        Ok(added) => {
+            for a in &added {
+                println!("  + {a}");
+            }
+            println!("
+  共导入 {} 个。用 `cargo run -- --skills` 查看。
+", added.len());
+            0
+        }
+        Err(e) => {
+            fail("导入", e);
+            1
+        }
+    }
+}
+
 pub async fn run_pipeline_check() -> i32 {
     let root = std::env::temp_dir().join("duanju-pipeline-check");
     let _ = std::fs::remove_dir_all(&root);

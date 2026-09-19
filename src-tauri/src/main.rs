@@ -16,6 +16,16 @@ fn main() {
         let code = tauri::async_runtime::block_on(duanju_workbench_lib::selftest::run_net_check());
         std::process::exit(code);
     }
+    if let Some(i) = args.iter().position(|a| a == "--import-skill") {
+        let paths: Vec<String> = args[i + 1..].to_vec();
+        if paths.is_empty() {
+            eprintln!("用法：cargo run -- --import-skill <zip 或 目录 或 md>…");
+            std::process::exit(2);
+        }
+        let code =
+            tauri::async_runtime::block_on(duanju_workbench_lib::selftest::run_import_skills(&paths));
+        std::process::exit(code);
+    }
     if args.iter().any(|a| a == "--skills") {
         let code = tauri::async_runtime::block_on(duanju_workbench_lib::selftest::run_list_skills());
         std::process::exit(code);

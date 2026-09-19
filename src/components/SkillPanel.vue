@@ -41,12 +41,16 @@ async function load() {
   }
 }
 
-/** 导入文件：可选多个 .md */
+/** 导入文件：可选多个 .md 或 .zip */
 async function importFiles() {
   const picked = await openDialog({
     multiple: true,
-    filters: [{ name: "Markdown", extensions: ["md", "markdown", "txt"] }],
-    title: "选择技能文件（可多选）",
+    filters: [
+      { name: "技能包 / 文档", extensions: ["zip", "md", "markdown", "txt"] },
+      { name: "压缩包", extensions: ["zip"] },
+      { name: "Markdown", extensions: ["md", "markdown", "txt"] },
+    ],
+    title: "选择技能压缩包或 Markdown（可多选）",
   });
   const list = Array.isArray(picked) ? picked : picked ? [picked] : [];
   if (!list.length) return;
@@ -171,7 +175,7 @@ async function previewFile(s: Skill, path: string) {
       <div class="row wrap" style="gap: 6px; margin-top: 10px">
         <UiButton variant="outline" size="sm" @click="importFiles">
           <template #icon><Import :size="13" /></template>
-          导入文件
+          导入 zip / md
         </UiButton>
         <UiButton variant="outline" size="sm" @click="importDir">
           <template #icon><FolderUp :size="13" /></template>
@@ -182,8 +186,10 @@ async function previewFile(s: Skill, path: string) {
           打开目录
         </UiButton>
       </div>
-      <p class="t-xs faint" style="margin-top: 6px">
-        「导入技能目录」也可以直接选一个合集目录（里面装着多个技能子目录），会一次性全部导入。
+      <p class="t-xs faint" style="margin-top: 6px; line-height: 1.7">
+        压缩包最省事：直接选 <span class="mono">.zip</span>（可多选），会自动找出里面的所有技能 ——
+        不管是「一个 zip 一个技能」还是「一个 zip 一整个合集」都认。
+        也可以选文件夹：「导入技能目录」支持单个技能目录，也支持装着多个技能的合集目录。
       </p>
     </div>
 

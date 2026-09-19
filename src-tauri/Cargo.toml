@@ -40,6 +40,8 @@ blake3 = "1"
 base64 = "0.22"
 # 上传到只收公网 URL 的平台（如 第三方平台）时要算文件 md5，用于去重与定位
 md5 = "0.7"
+# 导入技能压缩包（自带 enclosed_name 防 zip-slip）
+zip = { version = "2", default-features = false, features = ["deflate"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
