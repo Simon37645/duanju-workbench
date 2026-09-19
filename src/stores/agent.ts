@@ -7,8 +7,10 @@
 import { defineStore } from "pinia";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { api, errorText } from "@/api/ipc";
-import { message } from "@/ui";
-import type { AgentEvent, AgentSession, AgentToolCall, PrefixReport, UsageReport } from "@/types/agent";
+import { message, toast } from "@/ui";
+import type {
+  AgentEvent, AgentSession, AgentToolCall, ContextStats, PrefixReport, UsageReport,
+} from "@/types/agent";
 import type { PanelId } from "@/types/models";
 
 interface State {
@@ -21,10 +23,12 @@ interface State {
   streamTools: AgentToolCall[];
   prefix: PrefixReport | null;
   usage: UsageReport | null;
+  context: ContextStats | null;
   pending: { id: string; title: string } | null;
   /** agent 正在等用户回答的问题 */
   pendingAsk: { id: string; question: string; options: string[]; why: string } | null;
   lastError: string | null;
+  compacting: boolean;
   /** 上一次请求的前缀指纹，用来提示「前缀已变，缓存会失效」 */
   lastSentContext: Partial<Record<PanelId, string>>;
 }
@@ -39,9 +43,11 @@ export const useAgentStore = defineStore("agent", {
     streamTools: [],
     prefix: null,
     usage: null,
+    context: null,
     pending: null,
     pendingAsk: null,
     lastError: null,
+    compacting: false,
     lastSentContext: {},
   }),
 
@@ -214,6 +220,14 @@ export const useAgentStore = defineStore("agent", {
         case "usage":
           this.usage = ev.report;
           break;
+        case "context":
+          this.context = ev.stats;
+          break;
+        case "contextCompacted":
+          toast.info(
+            `上下文已自动压缩：${Math.round(ev.before / 1000)}k → ${Math.round(ev.after / 1000)}k token`,
+          );
+          break;
         case "error":
           this.lastError = ev.message;
           message.error(ev.message);
@@ -231,6 +245,33 @@ export const useAgentStore = defineStore("agent", {
     async answer(toolCallId: string, text: string) {
       await api.agentAnswer(toolCallId, text);
       this.pendingAsk = null;
+    },
+
+    /** 拉一次上下文水位（切换会话、压缩之后用） */
+    async refreshContext(sessionId?: string) {
+      const id = sessionId ?? this.activeSessionId;
+      if (!id) return;
+      try {
+        this.context = await api.agentContext(id);
+      } catch {
+        this.context = null;
+      }
+    },
+
+    /** 手动压缩。summarize=true 直接走模型摘要（花一次调用）。 */
+    async compact(summarize = false) {
+      const id = this.activeSessionId;
+      if (!id) return;
+      this.compacting = true;
+      try {
+        this.context = await api.agentCompact(id, summarize);
+        await this.refreshSession(id);
+        toast.ok("上下文已压缩");
+      } catch (e) {
+        toast.err(errorText(e));
+      } finally {
+        this.compacting = false;
+      }
     },
 
     async approve(toolCallId: string, approved: boolean) {

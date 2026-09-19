@@ -147,6 +147,8 @@ pub fn run() {
             commands::agent_run,
             commands::agent_approve,
             commands::agent_answer,
+            commands::agent_context,
+            commands::agent_compact,
             commands::agent_prefix_preview,
         ])
         .run(tauri::generate_context!())

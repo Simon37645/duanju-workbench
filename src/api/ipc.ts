@@ -233,6 +233,10 @@ export const api = {
     invoke<boolean>("agent_approve", { toolCallId, approved }),
   agentAnswer: (toolCallId: string, answer: string) =>
     invoke<boolean>("agent_answer", { toolCallId, answer }),
+  agentContext: (sessionId: string) =>
+    invoke<import("@/types/agent").ContextStats>("agent_context", { sessionId }),
+  agentCompact: (sessionId: string, summarize = false) =>
+    invoke<import("@/types/agent").ContextStats>("agent_compact", { sessionId, summarize }),
   agentPrefixPreview: (panel: PanelId, sessionId?: string) =>
     invoke<import("@/types/agent").PrefixReport>("agent_prefix_preview", {
       panel,

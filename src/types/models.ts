@@ -449,6 +449,9 @@ export interface AppSettings {
    */
   agentMode: "yolo" | "auto" | "confirm";
   maxToolRounds: number;
+  /** 单次对话的上下文预算（token 估算），超了自动压缩 */
+  contextBudget: number;
+  autoCompact: boolean;
   /** 代理模式：auto 跟随系统/环境变量 / off 直连 / manual 手动填 */
   proxyMode: "auto" | "off" | "manual";
   proxyUrl: string;

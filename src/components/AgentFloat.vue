@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import {
-  AlertTriangle, ArrowUp, Check, ChevronDown, ImagePlus, Loader2, MessageCircleQuestion,
-  Minus, Plus, RefreshCw, Send, Sparkles, Wrench, X, Zap,
+  AlertTriangle, ArrowUp, BookText, Check, ChevronDown, Gauge, ImagePlus, Images,
+  Loader2, MessageCircleQuestion, Minus, Plus, RefreshCw, Send, Sparkles, Trash2,
+  Wrench, X, Zap,
 } from "@lucide/vue";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useAgentStore } from "@/stores/agent";
@@ -14,10 +15,12 @@ import UiButton from "@/ui/Button.vue";
 import UiBadge from "@/ui/Badge.vue";
 import UiTextarea from "@/ui/Textarea.vue";
 import UiTooltip from "@/ui/Tooltip.vue";
+import UiPopover from "@/ui/Popover.vue";
 import UiSegmented from "@/ui/Segmented.vue";
 import UiInput from "@/ui/Input.vue";
 import Markdown from "@/components/Markdown.vue";
-import type { AgentToolCall } from "@/types/agent";
+import { api, errorText } from "@/api/ipc";
+import type { AgentToolCall, MentionItem } from "@/types/agent";
 import type { PanelId } from "@/types/models";
 
 const props = defineProps<{ panel: PanelId }>();
@@ -27,9 +30,12 @@ const settings = useSettingsStore();
 
 const open = ref(false);
 const input = ref("");
+const showSessions = ref(false);
+const skills = ref<{ name: string; description: string }[]>([]);
 const askDraft = ref("");
 const attachments = ref<string[]>([]);
 const scroller = ref<HTMLElement | null>(null);
+const mentionIndex = ref(0);
 const autoScroll = ref(true);
 const showReasoning = ref<Record<string, boolean>>({});
 
@@ -41,6 +47,68 @@ const modelLabel = computed(() => {
 });
 const cacheRate = computed(() => Math.round((agent.usage?.hitRate ?? 0) * 100));
 const hasUnread = computed(() => !open.value && (agent.running || !!agent.pendingAsk));
+
+/* ------------------------------------------------------------ 上下文 */
+
+const stats = computed(() => agent.context);
+const ctxPct = computed(() => Math.round(stats.value?.percent ?? 0));
+const ctxTone = computed(() => {
+  const p = stats.value?.percent ?? 0;
+  if (p >= 90) return "err";
+  if (p >= 75) return "warn";
+  return "ok";
+});
+
+const sessions = computed(() =>
+  agent.sessions
+    .slice()
+    .sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? "")),
+);
+
+/* ------------------------------------------------------------ @ 引用 */
+
+/** 光标处正在输入的 @ 片段；没有则为 null */
+const mentionQuery = computed(() => {
+  const m = /@([^\s@:]*)$/.exec(input.value);
+  return m ? m[1] : null;
+});
+const mentionOpen = computed(() => mentionQuery.value !== null);
+
+const mentionItems = computed<MentionItem[]>(() => {
+  if (!mentionOpen.value) return [];
+  const q = (mentionQuery.value ?? "").toLowerCase();
+  const items: MentionItem[] = [
+    ...skills.value.map((k) => ({
+      kind: "skill" as const,
+      label: k.name,
+      hint: k.description,
+      token: `@skill:${k.name}`,
+    })),
+    ...project.chapters.map((c) => ({
+      kind: "chapter" as const,
+      label: `第${c.index}章 ${c.title}`,
+      hint: "带上章节正文",
+      token: `@chapter:${c.index}`,
+    })),
+    ...project.assets.map((a) => ({
+      kind: "asset" as const,
+      label: a.name,
+      hint: "带上资产描述与参考图",
+      token: `@asset:${a.name}`,
+    })),
+  ];
+  return items.filter((i) => !q || i.label.toLowerCase().includes(q) || i.token.includes(q)).slice(0, 8);
+});
+
+function pickMention(item: MentionItem) {
+  input.value = input.value.replace(/@([^\s@:]*)$/, item.token + " ");
+}
+
+const KIND_ICON: Record<string, unknown> = {
+  skill: BookText,
+  chapter: BookText,
+  asset: Images,
+};
 
 const MODES = [
   { label: "YOLO", value: "yolo" },
@@ -68,6 +136,17 @@ watch(
 );
 
 // 有需要用户介入的事情时自动弹出
+// 切会话时把水位、技能候选都刷新一遍
+watch(
+  () => agent.activeSessionId,
+  async (id) => {
+    showSessions.value = false;
+    await agent.refreshContext(id ?? undefined);
+  },
+);
+
+watch(mentionItems, () => (mentionIndex.value = 0));
+
 watch(
   () => [agent.pendingAsk?.id, agent.pending?.id],
   ([a, b]) => {
@@ -79,6 +158,37 @@ function onScroll() {
   const el = scroller.value;
   if (!el) return;
   autoScroll.value = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+}
+
+/** 输入框键位：@ 菜单打开时先让菜单吃掉方向键与回车 */
+function onComposerKey(e: KeyboardEvent) {
+  if (mentionOpen.value && mentionItems.value.length) {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      mentionIndex.value = (mentionIndex.value + 1) % mentionItems.value.length;
+      return;
+    }
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      mentionIndex.value =
+        (mentionIndex.value - 1 + mentionItems.value.length) % mentionItems.value.length;
+      return;
+    }
+    if (e.key === "Enter" || e.key === "Tab") {
+      e.preventDefault();
+      pickMention(mentionItems.value[mentionIndex.value] ?? mentionItems.value[0]);
+      return;
+    }
+    if (e.key === "Escape") {
+      e.preventDefault();
+      input.value = input.value.replace(/@([^\s@:]*)$/, "");
+      return;
+    }
+  }
+  if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault();
+    send();
+  }
 }
 
 async function attach() {
@@ -151,9 +261,30 @@ const quickPrompts = computed(() => {
   return map[props.panel] ?? [];
 });
 
-onMounted(() => {
-  agent.loadSessions();
+onMounted(async () => {
+  await agent.loadSessions();
+  await agent.refreshContext();
+  try {
+    skills.value = (await api.skillList()).filter((s) => s.enabled);
+  } catch {
+    skills.value = [];
+  }
 });
+
+async function newChat() {
+  await agent.newSession(props.panel);
+  showSessions.value = false;
+}
+
+async function switchSession(id: string) {
+  agent.selectSession(props.panel, id);
+  await agent.refreshContext(id);
+}
+
+async function removeSession(id: string) {
+  await agent.deleteSession(id);
+  await agent.refreshContext();
+}
 </script>
 
 <template>
@@ -178,18 +309,94 @@ onMounted(() => {
           </div>
         </div>
 
-        <div class="row" style="gap: 6px; flex: 0 0 auto">
+        <div class="row" style="gap: 4px; flex: 0 0 auto">
+          <!-- 上下文水位 -->
+          <UiPopover :width="320" placement="bottom-end">
+            <template #trigger>
+              <button class="meter" :class="ctxTone" title="上下文水位">
+                <Gauge :size="11" />
+                <span class="num">{{ ctxPct }}%</span>
+                <span class="mtrack"><span class="mfill" :style="{ width: ctxPct + '%' }" /></span>
+              </button>
+            </template>
+            <div class="col" style="gap: 9px">
+              <div class="row-between">
+                <span class="section-label">对话上下文</span>
+                <span class="t-xs faint num">
+                  {{ ((stats?.messagesTokens ?? 0) / 1000).toFixed(1) }}k /
+                  {{ ((stats?.budget ?? 0) / 1000).toFixed(0) }}k token
+                </span>
+              </div>
+              <div class="kv">
+                <span class="faint">其中工具结果</span>
+                <span class="num">{{ ((stats?.toolResultTokens ?? 0) / 1000).toFixed(1) }}k</span>
+                <span class="faint">冻结前缀</span>
+                <span class="num">{{ ((stats?.prefixTokens ?? 0) / 1000).toFixed(1) }}k（可缓存）</span>
+                <span class="faint">轮次 / 消息</span>
+                <span class="num">{{ stats?.turns ?? 0 }} / {{ stats?.messages ?? 0 }}</span>
+              </div>
+              <div class="row" style="gap: 5px">
+                <UiButton variant="outline" size="xs" :loading="agent.compacting" @click="agent.compact(false)">
+                  压缩
+                </UiButton>
+                <UiButton variant="subtle" size="xs" :loading="agent.compacting" @click="agent.compact(true)">
+                  总结并压缩
+                </UiButton>
+              </div>
+              <p class="t-xs faint" style="line-height: 1.75">
+                「压缩」先清掉早期工具结果的原文（免费）；还超预算才调模型做摘要。
+                冻结前缀不受影响，那块缓存不会被压掉。
+              </p>
+            </div>
+          </UiPopover>
+
           <UiBadge v-if="cacheRate > 0" :tone="cacheRate >= 50 ? 'ok' : 'neutral'" size="xs">
             <Zap :size="9" /> {{ cacheRate }}%
           </UiBadge>
+
+          <!-- 对话列表 -->
+          <UiPopover :width="290" placement="bottom-end">
+            <template #trigger>
+              <UiButton variant="subtle" size="xs" icon title="对话列表">
+                <template #icon><ChevronDown :size="13" /></template>
+              </UiButton>
+            </template>
+            <div class="col" style="gap: 6px">
+              <div class="row-between">
+                <span class="section-label">对话</span>
+                <UiButton variant="outline" size="xs" @click="newChat">
+                  <template #icon><Plus :size="11" /></template>
+                  新建
+                </UiButton>
+              </div>
+              <div class="sessions">
+                <div
+                  v-for="s in sessions"
+                  :key="s.id"
+                  class="srow"
+                  :class="{ on: s.id === agent.activeSessionId }"
+                  @click="switchSession(s.id)"
+                >
+                  <div class="col grow" style="gap: 1px; min-width: 0">
+                    <span class="t-sm truncate">{{ s.title || "未命名对话" }}</span>
+                    <span class="t-xs faint num">
+                      {{ s.turns }} 轮 · {{ (s.updatedAt ?? "").slice(5, 16).replace("T", " ") }}
+                    </span>
+                  </div>
+                  <button class="sdel" @click.stop="removeSession(s.id)">
+                    <Trash2 :size="11" />
+                  </button>
+                </div>
+              </div>
+              <p class="t-xs faint" style="line-height: 1.7">
+                换新对话就是换一个干净的上下文窗口。旧对话还在，随时切回来。
+              </p>
+            </div>
+          </UiPopover>
+
           <UiTooltip placement="bottom" content="让 Simon 重新读取项目状态（会牺牲一次缓存命中）">
             <UiButton variant="subtle" size="xs" icon :disabled="agent.running" @click="refreshContext">
               <template #icon><RefreshCw :size="13" /></template>
-            </UiButton>
-          </UiTooltip>
-          <UiTooltip placement="bottom" content="新建对话">
-            <UiButton variant="subtle" size="xs" icon @click="agent.newSession(props.panel)">
-              <template #icon><Plus :size="13" /></template>
             </UiButton>
           </UiTooltip>
           <UiButton variant="subtle" size="xs" icon @click="open = false">
@@ -333,12 +540,30 @@ onMounted(() => {
           </div>
         </div>
 
-        <div class="composer">
+        <!-- @ 引用候选 -->
+      <Transition name="float">
+        <div v-if="mentionOpen && mentionItems.length" class="mentions">
+          <div class="mhead t-xs faint">引用内容 —— 选中后会随这条消息一起带给 Simon</div>
+          <button
+            v-for="(m, i) in mentionItems"
+            :key="m.token"
+            class="mrow"
+            :class="{ on: i === mentionIndex }"
+            @mousedown.prevent="pickMention(m)"
+          >
+            <component :is="KIND_ICON[m.kind]" :size="12" class="faint" />
+            <span class="t-sm truncate" style="max-width: 140px">{{ m.label }}</span>
+            <span class="t-xs faint truncate grow">{{ m.hint }}</span>
+          </button>
+        </div>
+      </Transition>
+
+      <div class="composer">
           <UiTextarea
             v-model="input"
             :rows="1"
             :resize="false"
-            :placeholder="agent.running ? '正在生成…' : '让 Simon 做什么？'"
+            :placeholder="agent.running ? '正在生成…' : '让 Simon 做什么？输入 @ 引用技能 / 章节 / 资产'"
             :disabled="agent.running"
             @keydown="
               (e: KeyboardEvent) => {
@@ -691,6 +916,131 @@ onMounted(() => {
   flex-direction: column;
   gap: 10px;
   animation: fade-in 200ms var(--ease);
+}
+
+/* 上下文水位 */
+.meter {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 30px;
+  padding: 0 9px;
+  border-radius: var(--r);
+  background: var(--surface-3);
+  border: 1px solid var(--line);
+  color: var(--fg-dim);
+  cursor: pointer;
+  font-size: var(--t-sm);
+}
+.meter:hover {
+  border-color: var(--line-strong);
+  color: var(--fg);
+}
+.mtrack {
+  display: block;
+  width: 26px;
+  height: 3px;
+  border-radius: var(--r-full);
+  background: var(--surface-5);
+  overflow: hidden;
+}
+.mfill {
+  display: block;
+  height: 100%;
+  background: var(--ok);
+  transition: width 240ms var(--ease);
+}
+.meter.warn {
+  color: var(--warn);
+}
+.meter.warn .mfill {
+  background: var(--warn);
+}
+.meter.err {
+  color: var(--err);
+}
+.meter.err .mfill {
+  background: var(--err);
+}
+.kv {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 12px;
+  font-size: var(--t-sm);
+}
+
+/* 对话列表 */
+.sessions {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 240px;
+  overflow: auto;
+}
+.srow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: var(--r-sm);
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+.srow:hover {
+  background: var(--surface-3);
+}
+.srow.on {
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+}
+.sdel {
+  background: none;
+  border: none;
+  color: var(--fg-ghost);
+  cursor: pointer;
+  padding: 2px;
+  border-radius: var(--r-xs);
+  opacity: 0;
+}
+.srow:hover .sdel {
+  opacity: 1;
+}
+.sdel:hover {
+  color: var(--err);
+  background: var(--surface-4);
+}
+
+/* @ 引用候选 */
+.mentions {
+  margin-bottom: 7px;
+  background: var(--surface-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg);
+  padding: 6px;
+  max-height: 230px;
+  overflow: auto;
+}
+.mhead {
+  padding: 3px 6px 6px;
+}
+.mrow {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--fg-dim);
+  cursor: pointer;
+  text-align: left;
+}
+.mrow:hover,
+.mrow.on {
+  background: var(--surface-4);
+  color: var(--fg);
 }
 
 .foot {

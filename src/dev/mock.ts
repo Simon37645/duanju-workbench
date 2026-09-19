@@ -239,6 +239,7 @@ const jobs: Job[] = [
 const settings: AppSettings = {
   theme: "dark", onboarded: true, workspacePanelWidth: 240, agentDockWidth: 400, agentDockOpen: true,
   agentMode: "auto", maxToolRounds: 12,
+  contextBudget: 64000, autoCompact: true,
   proxyMode: "auto", proxyUrl: "",
   asrBackend: "auto", asrUseGpu: true, asrGpuLayers: 999, asrThreads: 0,
   asrModel: "ggml-large-v3-turbo",
@@ -394,6 +395,16 @@ export async function mockInvoke(cmd: string, args?: Record<string, unknown>): P
         shotSizes: ["大远景", "远景", "全景", "中景", "中近景", "近景", "特写", "大特写", "过肩"],
         cameraMoves: ["固定", "横移", "推近", "拉远", "摇摄", "跟随", "升降", "环绕", "手持", "变焦"],
         timeOfDay: ["清晨", "白天", "黄昏", "夜晚", "深夜", "不限"],
+      };
+    case "agent_context":
+      return {
+        messagesTokens: 24600, toolResultTokens: 14200, prefixTokens: 5100,
+        budget: 64000, percent: 38, messages: 9, turns: 4, overThreshold: false,
+      };
+    case "agent_compact":
+      return {
+        messagesTokens: 9800, toolResultTokens: 2100, prefixTokens: 5100,
+        budget: 64000, percent: 15, messages: 4, turns: 4, overThreshold: false,
       };
     case "skill_list":
       return [

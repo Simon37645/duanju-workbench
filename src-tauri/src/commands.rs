@@ -962,6 +962,32 @@ pub async fn agent_run(
     Ok(sid)
 }
 
+/// 当前会话的上下文水位
+#[tauri::command]
+pub async fn agent_context(
+    state: State<'_, AppState>,
+    session_id: String,
+) -> Result<agent::context::ContextStats> {
+    let s = state
+        .session(&session_id)
+        .ok_or_else(|| AppError::NotFound("会话不存在".into()))?;
+    Ok(agent::context::stats(&state, &s))
+}
+
+/// 手动压缩上下文。`summarize` 为真时直接走模型摘要（会花一次调用）。
+#[tauri::command]
+pub async fn agent_compact(
+    state: State<'_, AppState>,
+    session_id: String,
+    summarize: Option<bool>,
+) -> Result<agent::context::ContextStats> {
+    let st = state.inner().clone();
+    let provider = agent::resolve_provider(&state)?;
+    let stats = agent::context::compact(&st, &provider, &session_id, summarize.unwrap_or(false)).await?;
+    let _ = state.emit_session_changed(&session_id);
+    Ok(stats)
+}
+
 #[tauri::command]
 pub async fn agent_answer(
     state: State<'_, AppState>,

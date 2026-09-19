@@ -10,6 +10,7 @@
 //!   * `ChatRequest.system` 一旦冻结就不再变；
 //!   * `messages` 只追加，历史消息永不改写。
 
+pub mod context;
 pub mod prompt;
 pub mod tools;
 
@@ -190,6 +191,15 @@ pub enum AgentEvent {
     Round {
         round: u32,
     },
+    /// 上下文水位
+    Context {
+        stats: context::ContextStats,
+    },
+    /// 刚做过一次自动压缩
+    ContextCompacted {
+        before: u64,
+        after: u64,
+    },
     RunFinished {
         run_id: String,
         stop_reason: String,
@@ -265,6 +275,12 @@ pub async fn run_turn(
     } else {
         blocks.push(Block::text(opts.input.clone()));
     }
+    // @ 引用：用户点名的技能 / 章节 / 资产，按需带进来
+    let mentioned = context::resolve_mentions(&state, &opts.input);
+    if !mentioned.is_empty() {
+        blocks.extend(mentioned);
+    }
+
     for path in &opts.image_paths {
         let p = std::path::Path::new(path);
         match llm::image_block_from_file(p, 12 * 1024 * 1024) {
@@ -322,6 +338,30 @@ pub async fn run_turn(
     // 4) 工具循环
     for round in 0..max_rounds {
         send(&channel, AgentEvent::Round { round: round + 1 });
+
+        // 进模型之前先看上下文水位；超了就压缩（第一刀免费，必要时才花一次调用）
+        let before = context::stats(&state, &session);
+        if before.over_threshold && settings.auto_compact {
+            match context::compact(&state, &provider, &session.id, false).await {
+                Ok(after) => {
+                    session = state.session(&session.id).unwrap_or(session);
+                    send(
+                        &channel,
+                        AgentEvent::ContextCompacted {
+                            before: before.messages_tokens,
+                            after: after.messages_tokens,
+                        },
+                    );
+                }
+                Err(e) => tracing::warn!("自动压缩失败：{e}"),
+            }
+        }
+        send(
+            &channel,
+            AgentEvent::Context {
+                stats: context::stats(&state, &session),
+            },
+        );
 
         let req = ChatRequest {
             model: model.clone(),
@@ -773,7 +813,7 @@ fn knowledge_index(state: &AppState) -> String {
     crate::skills::prompt_index(state)
 }
 
-fn resolve_provider(state: &AppState) -> Result<ProviderHandle> {
+pub fn resolve_provider(state: &AppState) -> Result<ProviderHandle> {
     let http = state.http_client()?;
     match state.active_provider(ProviderKind::Llm) {
         Some(cfg) => {

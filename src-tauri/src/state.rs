@@ -15,6 +15,7 @@ use crate::models::{AppSettings, ProviderConfig, ProviderKind};
 use crate::project::Project;
 
 pub const EVENT_PROJECT_CHANGED: &str = "project://changed";
+pub const EVENT_SESSION_CHANGED: &str = "agent://session-changed";
 
 #[derive(Default)]
 pub struct AgentRuntime {
@@ -61,6 +62,14 @@ impl AppState {
             s.prefix = None;
         }
         self.persist_sessions();
+    }
+
+    /// 某个会话被外部改动（比如压缩）后通知前端刷新
+    pub fn emit_session_changed(&self, session_id: &str) -> Result<()> {
+        if let Some(app) = self.app.read().clone() {
+            let _ = app.emit(EVENT_SESSION_CHANGED, session_id.to_string());
+        }
+        Ok(())
     }
 
     pub fn emit_changed(&self) {

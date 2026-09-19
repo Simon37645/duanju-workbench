@@ -581,6 +581,22 @@ const asrBackendOptions = computed(() => [
                 @update:model-value="(v: number | null) => settings.save({ maxToolRounds: v ?? 12 })"
               />
             </UiField>
+            <UiField
+              label="上下文预算"
+              :hint="'单次对话允许占用的 token 估算，超过 75% 自动压缩；当前 ' + ((settings.settings?.contextBudget ?? 0) / 1000) + 'k'"
+            >
+              <UiNumber
+                :model-value="settings.settings?.contextBudget"
+                :min="8000" :max="500000" :step="8000"
+                @update:model-value="(v: number | null) => settings.save({ contextBudget: v ?? 64000 })"
+              />
+            </UiField>
+            <UiField label="自动压缩" inline hint="超预算时自动清理旧工具结果、必要时做摘要">
+              <UiSwitch
+                :model-value="settings.settings?.autoCompact"
+                @update:model-value="(v: boolean) => settings.save({ autoCompact: v })"
+              />
+            </UiField>
           </div>
         </div>
       </template>

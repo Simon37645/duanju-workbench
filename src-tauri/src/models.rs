@@ -681,6 +681,10 @@ pub struct AppSettings {
     /// - confirm 任何会改数据的操作都先确认
     pub agent_mode: String,
     pub max_tool_rounds: u32,
+    /// 单次对话允许占用的上下文预算（token 估算），超了就自动压缩
+    pub context_budget: u32,
+    /// 是否允许自动压缩（关掉就只能手动压）
+    pub auto_compact: bool,
     pub asr_backend: String,
     pub asr_use_gpu: bool,
     pub asr_gpu_layers: i32,
@@ -714,6 +718,8 @@ impl Default for AppSettings {
             agent_dock_open: true,
             agent_mode: "auto".into(),
             max_tool_rounds: 12,
+            context_budget: 64000,
+            auto_compact: true,
             asr_backend: "auto".into(),
             asr_use_gpu: true,
             asr_gpu_layers: 999,

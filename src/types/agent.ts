@@ -78,6 +78,8 @@ export type AgentEvent =
     }
   | { type: "usage"; report: UsageReport }
   | { type: "round"; round: number }
+  | { type: "context"; stats: ContextStats }
+  | { type: "contextCompacted"; before: number; after: number }
   | {
       type: "runFinished";
       runId: string;
@@ -142,4 +144,26 @@ export interface AgentRunOptions {
   imagePaths?: string[];
   /** 强制刷新稳定前缀快照（会牺牲一次缓存命中） */
   refreshContext?: boolean;
+}
+
+/** 对话上下文水位（后端 src-tauri/src/agent/context.rs） */
+export interface ContextStats {
+  messagesTokens: number;
+  /** 其中工具结果占的部分 —— 压缩的第一刀砍这里 */
+  toolResultTokens: number;
+  /** 冻结前缀占用，单独算：它基本不变且可缓存 */
+  prefixTokens: number;
+  budget: number;
+  percent: number;
+  messages: number;
+  turns: number;
+  overThreshold: boolean;
+}
+
+/** @ 引用的候选项 */
+export interface MentionItem {
+  kind: "skill" | "chapter" | "asset";
+  label: string;
+  hint: string;
+  token: string;
 }
