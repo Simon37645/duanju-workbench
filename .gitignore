@@ -18,6 +18,10 @@ src-tauri/binaries/whisper-cli
 # pi 运行时 + whisper 模型（随包分发，由 scripts/prepare-sidecar.mjs 准备）
 src-tauri/sidecar-dist/
 
+# 导演台（DirectorDesk）上游源码与构建产物（由 scripts/prepare-director.mjs 生成）
+.director-src/
+public/director/
+
 # 打包出来的绿色版目录（体积大，由 npm run pack 生成）
 app/
 

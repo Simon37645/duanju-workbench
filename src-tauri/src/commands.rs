@@ -1058,6 +1058,44 @@ pub async fn agent_run(
     Ok(sid)
 }
 
+/* ============================================================ 导演台 */
+
+/// 保存导演台工程到项目目录（前端从 iframe 取 JSON 后送来）。
+#[tauri::command]
+pub fn director_save(state: State<'_, AppState>, content: String) -> Result<String> {
+    let path = state
+        .current()?
+        .root()
+        .join("previz")
+        .join("director.json");
+    crate::store::write_text(&path, &content)?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+/// 读取上次保存的导演台工程（没有则 null）。
+#[tauri::command]
+pub fn director_load(state: State<'_, AppState>) -> Result<Option<String>> {
+    let path = state
+        .current()?
+        .root()
+        .join("previz")
+        .join("director.json");
+    crate::store::read_text_opt(&path)
+}
+
+/// 前端回填导演台工具的执行结果（agent 工具在等它）。
+#[tauri::command]
+pub fn director_result(
+    state: State<'_, AppState>,
+    call_id: String,
+    ok: bool,
+    data: Option<Value>,
+    error: Option<String>,
+) -> Result<()> {
+    crate::director::resolve_call(&state, &call_id, ok, data.unwrap_or(Value::Null), error);
+    Ok(())
+}
+
 /* ============================================================ pi 引擎 */
 
 /// pi 引擎可用性（是否找到 pi、有没有可用模型、进程是否在跑）

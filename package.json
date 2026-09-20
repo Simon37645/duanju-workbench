@@ -12,7 +12,8 @@
     "tauri": "tauri",
     "app:dev": "tauri dev",
     "app:build": "tauri build",
-    "app:pack": "tauri build --no-bundle && node scripts/make-app.mjs --no-link",
+    "app:pack": "node scripts/prepare-director.mjs && tauri build --no-bundle && node scripts/make-app.mjs --no-link",
+    "director:prepare": "node scripts/prepare-director.mjs",
     "pack": "node scripts/make-app.mjs",
     "icons": "node scripts/gen-icon.mjs && tauri icon src-tauri/icons/source.png"
   },

@@ -27,6 +27,8 @@ pub struct AgentRuntime {
     pub approvals: Mutex<HashMap<String, oneshot::Sender<bool>>>,
     /// toolCallId -> 等待用户回答提问的通道
     pub answers: Mutex<HashMap<String, oneshot::Sender<String>>>,
+    /// 导演台工具调用：callId -> 等待前端（iframe 里的 DirectorDesk）执行结果的通道
+    pub director_calls: Mutex<HashMap<String, oneshot::Sender<Result<serde_json::Value>>>>,
     pub running: RwLock<HashSet<String>>,
 }
 

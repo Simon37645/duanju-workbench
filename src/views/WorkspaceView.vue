@@ -2,7 +2,6 @@
 import { computed, defineAsyncComponent, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import Sidebar from "@/components/Sidebar.vue";
-import TopBar from "@/components/TopBar.vue";
 import JobBar from "@/components/JobBar.vue";
 import AgentFloat from "@/components/AgentFloat.vue";
 import SettingsModal from "@/components/SettingsModal.vue";
@@ -59,8 +58,6 @@ onMounted(async () => {
     <Sidebar :active="activePanel" @settings="showSettings = true" />
 
     <div class="main">
-      <TopBar :panel="activePanel" @settings="showSettings = true" />
-
       <div class="work">
         <div v-if="loading" class="center-all">
           <UiSpinner :size="18" label="正在读取项目…" />
@@ -92,13 +89,16 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  /* 给折叠态的导航条留位置（它是 absolute 浮层，展开时会盖在上面） */
+  margin-left: 48px;
 }
 .work {
   flex: 1;
   min-height: 0;
   display: flex;
-  padding: var(--sp-3);
-  gap: var(--sp-3);
+  /* 面板铺满：不留外边距与间隙 */
+  padding: 0;
+  gap: 0;
 }
 .center-all {
   flex: 1;

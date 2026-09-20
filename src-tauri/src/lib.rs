@@ -11,6 +11,7 @@ pub mod asr;
 pub mod checklist_ops;
 mod commands;
 pub mod config;
+pub mod director;
 pub mod error;
 pub mod gen;
 pub mod jobs;
@@ -134,6 +135,10 @@ pub fn run() {
             commands::previz_render_begin,
             commands::previz_render_frame,
             commands::previz_render_finish,
+            // 导演台（3D 预演的高级形态，agent 可操作）
+            commands::director_save,
+            commands::director_load,
+            commands::director_result,
             // 技能
             commands::skill_list,
             commands::skill_read,

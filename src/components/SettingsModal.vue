@@ -13,9 +13,11 @@ import UiModal from "@/ui/Modal.vue";
 import UiSegmented from "@/ui/Segmented.vue";
 import UiSpinner from "@/ui/Spinner.vue";
 import SkillPanel from "@/components/SkillPanel.vue";
-import { toast } from "@/ui";
+import { confirmDialog, toast } from "@/ui";
 import { api, errorText } from "@/api/ipc";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
+import { useProjectStore } from "@/stores/project";
 import { useSettingsStore } from "@/stores/settings";
 import type { AsrCapabilities, ProviderConfig, ProviderKind } from "@/types/models";
 
@@ -23,7 +25,8 @@ const props = defineProps<{ show: boolean }>();
 const emit = defineEmits<{ (e: "update:show", v: boolean): void }>();
 
 const settings = useSettingsStore();
-const tab = ref("providers");
+const project = useProjectStore();
+const tab = ref("project");
 const asr = ref<AsrCapabilities | null>(null);
 const sidecar = ref<Record<string, { ok: boolean; path?: string; error?: string }> | null>(null);
 const proxy = ref<Awaited<ReturnType<typeof api.proxyStatus>> | null>(null);
@@ -107,11 +110,81 @@ const MODE_HINT: Record<string, string> = {
 };
 
 const TABS = [
+  { label: "项目", value: "project" },
   { label: "模型供应商", value: "providers" },
   { label: "技能", value: "skills" },
   { label: "字幕与显卡", value: "asr" },
   { label: "运行环境", value: "runtime" },
 ];
+
+/* ------------------------------------------------------------ 项目 */
+
+const proj = reactive({
+  name: "",
+  genre: "",
+  logline: "",
+  episodeCountHint: 0 as number | null,
+  aspectRatio: "9:16",
+});
+
+watch(
+  () => [props.show, project.manifest] as const,
+  () => {
+    const m = project.manifest;
+    if (!m) return;
+    Object.assign(proj, {
+      name: m.name,
+      genre: m.genre,
+      logline: m.logline,
+      episodeCountHint: m.episodeCountHint,
+      aspectRatio: m.aspectRatio,
+    });
+  },
+  { immediate: true },
+);
+
+async function saveProjectInfo() {
+  try {
+    await api.projectUpdateManifest({ ...proj, episodeCountHint: proj.episodeCountHint ?? 0 });
+    await project.reload();
+    toast.ok("项目信息已保存");
+  } catch (e) {
+    toast.err(errorText(e));
+  }
+}
+
+async function openProjectFolder() {
+  try {
+    const paths = await api.projectPaths(project.root);
+    await openPath(paths.root);
+  } catch (e) {
+    toast.err(errorText(e));
+  }
+}
+
+async function openOtherProject() {
+  const picked = await openDialog({ directory: true, multiple: false, title: "选择项目目录" });
+  if (typeof picked !== "string") return;
+  try {
+    await project.open(picked);
+    toast.ok("项目已打开");
+    emit("update:show", false);
+  } catch (e) {
+    toast.err(errorText(e));
+  }
+}
+
+async function closeProject() {
+  const ok = await confirmDialog({
+    title: "关闭项目",
+    content: "数据都在磁盘上，不会丢失，之后可以从项目列表再打开。",
+    positiveText: "关闭",
+  });
+  if (!ok) return;
+  await project.close();
+  emit("update:show", false);
+  location.hash = "#/";
+}
 
 const adapterOptions = (kind?: ProviderKind) =>
   kind === "llm"
@@ -266,8 +339,42 @@ const asrBackendOptions = computed(() => [
         <UiSegmented v-model="tab" :items="TABS" />
       </div>
 
+      <!-- ==================================================== 项目 -->
+      <template v-if="tab === 'project'">
+        <div class="card card-pad col" style="gap: 12px">
+          <span class="section-label">项目信息</span>
+          <div class="grid2" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px">
+            <UiField label="项目名"><UiInput v-model="proj.name" /></UiField>
+            <UiField label="题材"><UiInput v-model="proj.genre" /></UiField>
+          </div>
+          <UiField label="一句话卖点"><UiInput v-model="proj.logline" /></UiField>
+          <div class="grid2" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px">
+            <UiField label="计划章节数"><UiNumber v-model="proj.episodeCountHint" :min="0" /></UiField>
+            <UiField label="画幅（如 9:16）"><UiInput v-model="proj.aspectRatio" /></UiField>
+          </div>
+          <div class="row" style="justify-content: flex-end">
+            <UiButton variant="primary" size="sm" @click="saveProjectInfo">保存项目信息</UiButton>
+          </div>
+        </div>
+
+        <div class="card card-pad col" style="gap: 10px">
+          <span class="section-label">项目目录</span>
+          <div class="kv">
+            <span class="faint">位置</span><span class="truncate" :title="project.root">{{ project.root || "未打开项目" }}</span>
+          </div>
+          <div class="row" style="gap: 8px; flex-wrap: wrap">
+            <UiButton variant="outline" size="sm" @click="openProjectFolder">在文件管理器打开</UiButton>
+            <UiButton variant="outline" size="sm" @click="openOtherProject">打开其他项目</UiButton>
+            <UiButton variant="subtle" size="sm" @click="closeProject">关闭项目</UiButton>
+          </div>
+          <p class="t-xs faint" style="line-height: 1.7">
+            项目就是一个普通文件夹：JSON 存结构化数据、Markdown 存正文、媒体就是媒体文件，整个目录拷走就能在另一台机器打开。
+          </p>
+        </div>
+      </template>
+
       <!-- ==================================================== 供应商 -->
-      <template v-if="tab === 'providers'">
+      <template v-else-if="tab === 'providers'">
         <div class="hint">
           生图 / 生视频用「通用 HTTP」适配器 —— 请求地址、body 模板、轮询与结果字段都写在
           options 里，换一家接口只需要改配置。详细说明见 <span class="mono">docs/PROVIDER.md</span>。

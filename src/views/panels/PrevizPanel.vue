@@ -7,10 +7,11 @@
  * 显示选中物体的关键帧轨道）。
  */
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
   Box, ChevronDown, Circle, Clapperboard, Crosshair, Cylinder, Diamond, Eye, Film,
-  Layers, ListTree, Move, Maximize, Pause, PersonStanding, Play, RotateCw, SkipBack,
-  SlidersHorizontal, Square, Trash2, Triangle, Video, X,
+  FolderOpen, Layers, ListTree, Move, Maximize, Pause, PersonStanding, Play, RotateCw,
+  Save, SkipBack, SlidersHorizontal, Square, Trash2, Triangle, Video, X,
 } from "@lucide/vue";
 import UiButton from "@/ui/Button.vue";
 import UiEmpty from "@/ui/Empty.vue";
@@ -210,11 +211,18 @@ onMounted(async () => {
   engine.setClay(clay.value);
   refreshList();
   window.addEventListener("keydown", onKey);
+  // agent（自研 / pi 引擎）经 Rust 事件桥操作导演台；浏览器预览里没有 Tauri，忽略失败
+  listen<{ callId: string; name: string; args?: unknown }>("director://call", (e) => {
+    void handleDirectorCall(e.payload);
+  })
+    .then((fn) => (unlistenDirector = fn))
+    .catch(() => {});
 });
 
 onBeforeUnmount(() => {
   disposed = true;
   window.removeEventListener("keydown", onKey);
+  unlistenDirector?.();
   if (saveTimer !== null) window.clearTimeout(saveTimer);
   if (engine && saveTimer !== null) void api.previzPut(engine.serialize()).catch(() => {});
   engine?.dispose();
@@ -459,6 +467,124 @@ function exitPov() {
   engine?.setView("editor");
 }
 
+/* ------------------------------------------------------ 导演台（DirectorDesk） */
+
+/**
+ * 预演面板有两个引擎：
+ * - 自研预演：轻量白模 + 关键帧时间轴，与项目数据/教学一体；
+ * - 导演台：集成 DirectorDesk（MIT）的成熟预演引擎（灯光/运镜/路径调度/曲线），
+ *   以 iframe 承载（隔离它自己的全局样式），换皮对齐工作台设计，工程随项目保存。
+ */
+const surface = ref<"builtin" | "director">(
+  (() => {
+    try {
+      return localStorage.getItem("previz.surface") === "director" ? "director" : "builtin";
+    } catch {
+      return "builtin";
+    }
+  })(),
+);
+const ddFrame = ref<HTMLIFrameElement | null>(null);
+const ddSrc = `${import.meta.env.BASE_URL || "/"}director/index.html`;
+
+function switchSurface(v: "builtin" | "director") {
+  surface.value = v;
+  try {
+    localStorage.setItem("previz.surface", v);
+  } catch {
+    /* 隐私模式等场景忽略 */
+  }
+}
+
+/** 换皮：把导演台的中性灰主题对齐工作台设计 tokens（在 iframe 内注入覆盖） */
+const DIRECTOR_SKIN = `
+  :root {
+    --panel: #1a1d23 !important;
+    --line: #2c3037 !important;
+    --muted: #8b93a0 !important;
+    --blue: #f2a13c !important;
+    color-scheme: dark !important;
+  }
+  body { background: #16181d !important; color: #e6e8ec !important; }
+  button { background: #23262d !important; border-color: #343943 !important; border-radius: 6px !important; }
+  button:hover { background: #2c313a !important; border-color: #4a515e !important; }
+  input, select { background: #1e2128 !important; border-color: #343943 !important; border-radius: 6px !important; }
+  select option { background-color: #1e2128 !important; color: #e6e8ec !important; }
+`;
+
+function onDdLoad() {
+  const doc = ddFrame.value?.contentDocument;
+  if (!doc) return;
+  if (!doc.head.querySelector("style[data-workbench-skin]")) {
+    const style = doc.createElement("style");
+    style.dataset.workbenchSkin = "1";
+    style.textContent = DIRECTOR_SKIN;
+    doc.head.appendChild(style);
+  }
+  // iframe 里应用初始化时可能读到的是未布局的尺寸，触发一次 resize 让它按实际大小重排
+  const win = ddFrame.value?.contentWindow;
+  const kick = () => win?.dispatchEvent(new Event("resize"));
+  setTimeout(kick, 200);
+  setTimeout(kick, 800);
+}
+
+/** 导演台暴露的自动化接口（window.__director，同源可直接访问） */
+interface DirectorApi {
+  callTool: (name: string, args?: Record<string, unknown>) => Promise<{ ok: boolean; data?: unknown; error?: string }>;
+  getDocument: () => unknown;
+  replaceProject: (doc: unknown) => void;
+}
+function ddApi(): DirectorApi | null {
+  return (ddFrame.value?.contentWindow as unknown as { __director?: DirectorApi } | null)?.__director ?? null;
+}
+
+/** 保存导演台工程到项目目录（<项目>/previz/director.json） */
+async function saveDirector() {
+  const api_ = ddApi();
+  if (!api_) return toast.warn("导演台还没加载完成");
+  try {
+    const doc = api_.getDocument();
+    const path = await api.directorSave(JSON.stringify(doc));
+    toast.ok(`工程已保存到项目：${path}`);
+  } catch (e) {
+    toast.err(`保存失败：${errorText(e)}`);
+  }
+}
+
+/** 从项目目录恢复工程（覆盖当前导演台里的内容） */
+async function loadDirector() {
+  const api_ = ddApi();
+  if (!api_) return toast.warn("导演台还没加载完成");
+  try {
+    const raw = await api.directorLoad();
+    if (!raw) return toast.info("这个项目还没有保存过导演台工程，先在导演台里搭好再点「保存工程」");
+    api_.replaceProject(JSON.parse(raw));
+    toast.ok("已从项目恢复工程");
+  } catch (e) {
+    toast.err(`恢复失败：${errorText(e)}`);
+  }
+}
+
+/** agent（自研 / pi 引擎）通过事件桥调导演台：执行并把结果回填 */
+let unlistenDirector: UnlistenFn | null = null;
+async function handleDirectorCall(payload: { callId: string; name: string; args?: unknown }) {
+  try {
+    const api_ = ddApi();
+    if (!api_) throw new Error("导演台面板未打开：请先切到「导演台」模式并等它加载完成");
+    let data: unknown;
+    if (payload.name === "__get_document") {
+      data = api_.getDocument();
+    } else {
+      const r = await api_.callTool(payload.name, (payload.args as Record<string, unknown>) ?? {});
+      if (!r?.ok) throw new Error(r?.error ?? "执行失败");
+      data = r.data;
+    }
+    await api.directorResult(payload.callId, true, data);
+  } catch (e) {
+    await api.directorResult(payload.callId, false, null, errorText(e)).catch(() => {});
+  }
+}
+
 /* ------------------------------------------------------------ 导出白模视频 */
 
 async function exportVideo() {
@@ -506,10 +632,40 @@ async function exportVideo() {
 
 <template>
   <div class="previz" @pointerdown="closeMenu">
-    <div ref="canvasHost" class="canvas" />
+    <div v-show="surface === 'builtin'" ref="canvasHost" class="canvas" />
+
+    <!-- 导演台：iframe 承载（隔离它自己的全局样式），换皮与桥接见 onDdLoad -->
+    <iframe
+      v-if="surface === 'director'"
+      ref="ddFrame"
+      :src="ddSrc"
+      class="dd-frame"
+      title="导演台 DirectorDesk"
+      @load="onDdLoad"
+    />
 
     <!-- 左上角菜单栏 -->
     <div class="menubar" data-tour="previz-menubar" @pointerdown.stop>
+      <!-- 预演引擎切换 -->
+      <div class="mode-group">
+        <button
+          class="mode-btn"
+          :class="{ on: surface === 'builtin' }"
+          title="轻量白模 + 关键帧时间轴，与项目数据一体"
+          @click="switchSurface('builtin')"
+        >
+          自研预演
+        </button>
+        <button
+          class="mode-btn"
+          :class="{ on: surface === 'director' }"
+          title="DirectorDesk（MIT 开源）：灯光 / 运镜 / 走位路径 / 曲线编辑"
+          @click="switchSurface('director')"
+        >
+          导演台
+        </button>
+      </div>
+      <template v-if="surface === 'builtin'">
       <div class="menu-wrap">
         <UiButton variant="outline" size="sm" @click="toggleMenu('add')">
           <Layers :size="13" /> 添加 <ChevronDown :size="11" />
@@ -600,15 +756,25 @@ async function exportVideo() {
 
       <span v-if="modelStatus === 'loading'" class="t-xs faint">模型加载中…</span>
       <span v-else-if="modelStatus === 'fallback'" class="t-xs faint">模型缺失，已用胶囊人顶替</span>
+      </template>
+      <template v-else>
+        <UiButton variant="outline" size="sm" @click="saveDirector">
+          <Save :size="13" /> 保存工程
+        </UiButton>
+        <UiButton variant="outline" size="sm" @click="loadDirector">
+          <FolderOpen :size="13" /> 恢复工程
+        </UiButton>
+        <span class="t-xs faint">DirectorDesk（MIT 开源）· 工程随项目保存 · agent 可操作</span>
+      </template>
     </div>
 
     <!-- 返回编辑视图 -->
-    <UiButton v-if="povActive" variant="outline" size="sm" class="exit-pov" @click="exitPov">
+    <UiButton v-if="povActive && surface === 'builtin'" variant="outline" size="sm" class="exit-pov" @click="exitPov">
       ← 返回编辑视图（Numpad 0）
     </UiButton>
 
     <!-- 右上角：对象列表 -->
-    <div v-if="showObjects" class="objects" @pointerdown.stop>
+    <div v-if="showObjects && surface === 'builtin'" class="objects" @pointerdown.stop>
       <div class="panel-title">场景对象</div>
       <template v-if="sceneData.primitives.length || sceneData.characters.length || sceneData.cameras.length">
         <div v-if="sceneData.cameras.length" class="elist">
@@ -658,7 +824,7 @@ async function exportVideo() {
     </div>
 
     <!-- 右侧：选中属性 -->
-    <div v-if="selected && showInspector" class="inspector scroll" @pointerdown.stop>
+    <div v-if="selected && showInspector && surface === 'builtin'" class="inspector scroll" @pointerdown.stop>
       <div class="row-between">
         <span class="panel-title">属性</span>
         <button class="close" @click="engine?.select(null)"><X :size="12" /></button>
@@ -744,12 +910,12 @@ async function exportVideo() {
     </div>
 
     <!-- 左下角：快捷键提示 -->
-    <div class="keyhint" :class="{ lifted: showTimeline }">
+    <div v-if="surface === 'builtin'" class="keyhint" :class="{ lifted: showTimeline }">
       <b>G</b> 移动 · <b>R</b> 旋转 · <b>S</b> 缩放 · 空格 播放 · <b>Numpad 0</b> 机位视角
     </div>
 
     <!-- 底部：时间轴 -->
-    <div v-if="showTimeline" class="timeline" data-tour="previz-timeline" @pointerdown.stop>
+    <div v-if="showTimeline && surface === 'builtin'" class="timeline" data-tour="previz-timeline" @pointerdown.stop>
       <div class="tl-head">
         <UiButton variant="outline" size="xs" icon :title="playing ? '暂停（空格）' : '播放（空格）'" @click="togglePlay">
           <template #icon><Pause v-if="playing" :size="12" /><Play v-else :size="12" /></template>
@@ -844,7 +1010,7 @@ async function exportVideo() {
     </div>
 
     <!-- 导出进度 -->
-    <div v-if="exporting" class="export-mask" @pointerdown.stop>
+    <div v-if="exporting && surface === 'builtin'" class="export-mask" @pointerdown.stop>
       <div class="export-card">
         <Film :size="16" />
         <div class="col" style="gap: 4px; min-width: 200px">
@@ -863,14 +1029,21 @@ async function exportVideo() {
   flex: 1;
   min-width: 0;
   min-height: 0;
-  border: 1px solid var(--line-faint);
-  border-radius: var(--r-lg);
   overflow: hidden;
   background: var(--surface-2);
 }
 .canvas {
   position: absolute;
   inset: 0;
+}
+/* 导演台 iframe：铺满面板（它自己是完整应用界面） */
+.dd-frame {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: #16181d;
 }
 
 /* ------------------------------------------------------------ 菜单栏 */

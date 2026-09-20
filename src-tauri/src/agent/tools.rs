@@ -36,6 +36,7 @@ pub const READ_ONLY_TOOLS: &[&str] = &[
     "skill_list",
     "skill_read",
     "skill_read_file",
+    "director_scene",
 ];
 
 pub fn is_read_only(name: &str) -> bool {
@@ -1831,6 +1832,27 @@ fn parse_panel(s: &str) -> Result<PanelId> {
     }
 }
 
+/* ============================ 3D 预演（导演台） ============================ */
+
+/// 读导演台工程（前端 iframe 里的 window.__director.getDocument）
+async fn director_scene(ctx: ToolCtx, _args: Value) -> Result<ToolOutcome> {
+    let v = crate::director::call_director(&ctx.state, "__get_document", json!({})).await?;
+    let scenes = v
+        .get("scenes")
+        .and_then(|s| s.as_array())
+        .map(|a| a.len())
+        .unwrap_or(0);
+    Ok(ToolOutcome::new(format!("已读取导演台工程（{scenes} 个戏段）"), v))
+}
+
+/// 调导演台自己的工具编辑工程
+async fn director_action(ctx: ToolCtx, args: Value) -> Result<ToolOutcome> {
+    let name = arg_str(&args, "name")?;
+    let params = args.get("args").cloned().unwrap_or_else(|| json!({}));
+    let v = crate::director::call_director(&ctx.state, &name, params).await?;
+    Ok(ToolOutcome::new(format!("导演台「{name}」执行完成"), v))
+}
+
 /* ============================ 注册表 ============================ */
 
 /// 返回**全部**工具。
@@ -2206,6 +2228,24 @@ pub fn registry(_panel: PanelId) -> Vec<Tool> {
             ),
         ]);
     }
+
+    // 导演台（3D 预演的高级形态）：Rust 只做转发，实际操作在前端 iframe 里执行
+    tools.push(tool!(
+        "director_scene",
+        "读取 3D 预演工程",
+        "读取「3D预演 · 导演台」的当前工程：场景、人物、走位路径、机位与时间轴。要了解预演现状、或打算改动它之前先调用。需要用户在「3D预演」面板里切到「导演台」模式。",
+        schema::empty(),
+        false,
+        director_scene
+    ));
+    tools.push(tool!(
+        "director_tool",
+        "操作 3D 预演（导演台）",
+        "调用导演台的能力编辑预演工程：布景、人物走位、运镜与镜头效果、灯光等。name 传它的工具名、args 传参数对象。先读 director_scene 了解现状再改；返回执行结果。",
+        schema::director_tool(),
+        false,
+        director_action
+    ));
 
     tools
 }

@@ -276,6 +276,16 @@ onMounted(async () => {
 
 /* ------------------------------------------------------------ 引擎切换 */
 
+const llmOptions = computed(() =>
+  settings.byKind("llm").map((p) => ({ label: p.name, hint: p.model, value: p.id })),
+);
+
+async function switchModel(id: string | null) {
+  if (!id) return;
+  await settings.save({ activeLlmProviderId: id });
+  toast.info("已切换模型，提示词前缀会重建（缓存需重新写入一次）");
+}
+
 const engineHint = computed(() => {
   const s = agent.piStatus;
   if (agent.engine === "pi") {
@@ -621,6 +631,21 @@ async function removeSession(id: string) {
               >
                 {{ agent.engine === "pi" ? "pi 引擎" : "自研引擎" }}
               </UiButton>
+              <div v-if="llmOptions.length" style="width: 148px">
+                <UiSelect
+                  :model-value="settings.settings?.activeLlmProviderId ?? null"
+                  :options="llmOptions"
+                  placeholder="选择模型"
+                  @update:model-value="switchModel"
+                />
+              </div>
+              <span
+                v-else
+                class="t-xs faint"
+                title="在「设置 → 模型供应商」里配置文本模型"
+              >
+                未配置模型
+              </span>
               <span class="t-xs faint">Ctrl+Enter 发送</span>
             </div>
             <button class="send" :disabled="agent.running || (!input.trim() && !attachments.length)" @click="send">

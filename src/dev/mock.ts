@@ -303,6 +303,12 @@ export async function mockInvoke(cmd: string, args?: Record<string, unknown>): P
       return null;
     case "previz_render_finish":
       return "mock://previz.mp4（浏览器预览不真正合成）";
+    case "director_save":
+      return "mock://项目/previz/director.json（浏览器预览不真正落盘）";
+    case "director_load":
+      return null;
+    case "director_result":
+      return null;
     case "agent_sessions":
       return [
         {

@@ -173,11 +173,11 @@ a:hover {
   padding: var(--sp-4);
 }
 
-/* 面板：工作区里的一整块 */
+/* 面板：铺满工作区（导航条是浮层，面板从它右侧一直铺到屏幕边缘） */
 .panel {
   background: var(--surface-2);
-  border: 1px solid var(--line);
-  border-radius: var(--r-lg);
+  border: none;
+  border-radius: 0;
   display: flex;
   flex-direction: column;
   min-height: 0;

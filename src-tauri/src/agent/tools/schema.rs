@@ -26,6 +26,24 @@ pub fn empty() -> Value {
     json!({ "type": "object", "properties": {}, "required": [] })
 }
 
+/// 导演台通用工具调用：name + args 透传给它的工具服务
+pub fn director_tool() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "name": {
+                "type": "string",
+                "description": "导演台的工具名（布景 / 走位 / 运镜 / 灯光等编辑动作）"
+            },
+            "args": {
+                "type": "object",
+                "description": "该工具的参数对象；不确定结构时先传空对象或先读 director_scene 的结果"
+            }
+        },
+        "required": ["name"]
+    })
+}
+
 pub fn sections() -> Value {
     obj(
         json!({

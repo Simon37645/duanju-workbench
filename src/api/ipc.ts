@@ -197,6 +197,12 @@ export const api = {
     invoke<void>("previz_render_frame", { index, dataB64 }),
   previzRenderFinish: (fps: number) => invoke<string>("previz_render_finish", { fps }),
 
+  /* -------------------------------------------------------- 导演台（预演） */
+  directorSave: (content: string) => invoke<string>("director_save", { content }),
+  directorLoad: () => invoke<string | null>("director_load"),
+  directorResult: (callId: string, ok: boolean, data: unknown, error?: string) =>
+    invoke<void>("director_result", { callId, ok, data, error }),
+
   /* ------------------------------------------------------------ 技能 */
   skillList: () => invoke<import("@/types/models").Skill[]>("skill_list"),
   skillRead: (id: string) => invoke<string>("skill_read", { id }),
