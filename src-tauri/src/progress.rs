@@ -198,6 +198,29 @@ pub fn progress(p: &ProjectSnapshot, panel: PanelId) -> PanelProgress {
             }
             (total, done)
         }
+        PanelId::Previz => {
+            // 预演场景是前端自治的 JSON（.workbench/previz.json），这里只数实体
+            let scene = crate::store::read_json_opt::<serde_json::Value>(&previz_file(p))
+                .ok()
+                .flatten();
+            let count = |key: &str| -> u32 {
+                scene
+                    .as_ref()
+                    .and_then(|s| s.get(key))
+                    .and_then(|v| v.as_array())
+                    .map(|a| a.len() as u32)
+                    .unwrap_or(0)
+            };
+            let props = count("primitives") + count("characters");
+            let cameras = count("cameras");
+            if props == 0 {
+                blockers.push("还没有摆放任何预演物体".into());
+            }
+            if cameras == 0 {
+                blockers.push("还没有添加预演机位".into());
+            }
+            (2, if props > 0 && cameras > 0 { 2 } else { 0 })
+        }
     };
 
     let percent = if total == 0 {
@@ -219,6 +242,13 @@ pub fn progress(p: &ProjectSnapshot, panel: PanelId) -> PanelProgress {
     }
 }
 
+/// 预演场景文件（前端自治 JSON，Rust 只读它算进度）。
+fn previz_file(p: &ProjectSnapshot) -> std::path::PathBuf {
+    std::path::Path::new(&p.root)
+        .join(".workbench")
+        .join("previz.json")
+}
+
 /// 自动检查项：与上面的完成度同源，agent 只能读不能改。
 pub fn auto_items(p: &ProjectSnapshot) -> Vec<ChecklistItem> {
     let mut out = vec![];
@@ -233,6 +263,8 @@ pub fn auto_items(p: &ProjectSnapshot) -> Vec<ChecklistItem> {
             PanelId::Edit => format!("剪辑：时间线 {} 段（可铺 {} 段）", pr.done, pr.total),
             PanelId::Subtitle => "字幕：已生成字幕文档".to_string(),
             PanelId::Checklist => continue,
+            PanelId::Previz if pr.done > 0 => "3D预演：白模场景与机位已就绪".to_string(),
+            PanelId::Previz => continue,
         };
         out.push(ChecklistItem {
             id: format!("auto_{}", pr.panel.as_str()),
@@ -262,7 +294,6 @@ pub fn default_items() -> Vec<ChecklistItem> {
         (PanelId::Video, "重点镜头的效果已人工确认"),
         (PanelId::Edit, "片段衔接处没有黑帧"),
         (PanelId::Subtitle, "字幕断句不超过 18 个字"),
-        (PanelId::Checklist, "整片已完整看一遍"),
     ];
     rows.iter()
         .map(|(panel, text)| ChecklistItem {

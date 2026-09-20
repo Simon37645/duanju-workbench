@@ -259,6 +259,292 @@ pub async fn run_import_skills(paths: &[String]) -> i32 {
     }
 }
 
+/// pi 引擎自检：真实跑一轮对话（会消耗少量模型额度）。
+///
+/// ```bash
+/// cargo run -- --pi-check [项目路径]
+/// ```
+/// 不指定项目路径时用临时项目；依次验证：状态探测 → 真实对话流式事件 →
+/// 会话文件落盘 → 进程复用 → 重启后会话恢复。
+pub async fn run_pi_check(project_path: Option<String>) -> i32 {
+    use crate::agent::AgentEvent;
+    use parking_lot::Mutex;
+    use tauri::ipc::{Channel, InvokeResponseBody};
+
+    // 自检路径不经过 run()，追踪订阅器要在这里自己初始化（诊断日志才有输出）
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .try_init();
+
+    println!("\n=== pi 引擎自检 ===\n");
+    let state = AppState::new(crate::config::default_config_dir());
+
+    let proj = match project_path.as_deref() {
+        Some(p) => match Project::open(std::path::Path::new(p)) {
+            Ok(pr) => pr,
+            Err(e) => {
+                fail("打开项目", e);
+                return 1;
+            }
+        },
+        None => {
+            let tmp = std::env::temp_dir().join(format!("pi-check-{}", std::process::id()));
+            match Project::create(&tmp, "pi-check") {
+                Ok(pr) => pr,
+                Err(e) => {
+                    fail("建临时项目", e);
+                    return 1;
+                }
+            }
+        }
+    };
+    let root = proj.paths.root.clone();
+    state.set_project(Some(proj));
+
+    let st = crate::pi::status(&state).await;
+    println!("  可用性    {}", if st.available { "可用" } else { "不可用" });
+    println!("  pi 路径   {}", st.path.as_deref().unwrap_or("-"));
+    println!("  版本      {}", st.version.as_deref().unwrap_or("-"));
+    println!("  说明      {}", st.detail);
+    if !st.available {
+        fail("pi 状态", "不可用（先配置文本模型 provider）");
+        return 1;
+    }
+
+    // 收集事件类型与流式文本
+    let types: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(vec![]));
+    let deltas: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
+    let t = types.clone();
+    let d = deltas.clone();
+    let channel = Channel::<AgentEvent>::new(move |body: InvokeResponseBody| {
+        if let InvokeResponseBody::Json(s) = body {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&s) {
+                let ty = v.get("type").and_then(|x| x.as_str()).unwrap_or("");
+                if ty == "textDelta" {
+                    if let Some(txt) = v.get("text").and_then(|x| x.as_str()) {
+                        d.lock().push_str(txt);
+                    }
+                }
+                t.lock().push(ty.to_string());
+            }
+        }
+        Ok(())
+    });
+
+    let question = "用一句话回答：你现在能正常工作吗？".to_string();
+    match crate::pi::run_turn(&state, channel, question, vec![]).await {
+        Ok(run_id) => {
+            let seen = types.lock().clone();
+            let text = deltas.lock().clone();
+            let has_delta = seen.iter().any(|x| x == "textDelta");
+            let has_finish = seen.iter().any(|x| x == "runFinished");
+            let line = format!(
+                "run {run_id}，{} 个事件，回复 {} 字",
+                seen.len(),
+                text.chars().count()
+            );
+            if has_delta && has_finish && !text.trim().is_empty() {
+                ok("pi 往返", line);
+                println!("      回复：{}", text.trim().chars().take(80).collect::<String>());
+            } else {
+                fail("pi 往返", format!("{line}；事件：{}", seen.join("、")));
+            }
+        }
+        Err(e) => fail("pi 往返", e),
+    }
+
+    // 会话文件应已落盘
+    let sess_file = root.join(".workbench").join("pi").join("last-session.txt");
+    match crate::store::read_text_opt(&sess_file) {
+        Ok(Some(sf)) if std::path::Path::new(sf.trim()).is_file() => {
+            ok("会话落盘", sf.trim().to_string())
+        }
+        Ok(other) => fail("会话落盘", format!("last-session.txt 内容异常：{other:?}")),
+        Err(e) => fail("会话落盘", e),
+    }
+
+    // 进程应保持常驻
+    let st2 = crate::pi::status(&state).await;
+    if st2.running {
+        ok("进程常驻", "对话结束后 sidecar 仍在运行");
+    } else {
+        fail("进程常驻", "对话结束后进程不在了");
+    }
+
+    // 工具桥：让 pi 真实调用一个只读工具（project_snapshot），验证
+    // extension → 本地 HTTP 桥 → actions/tools registry 的完整链路
+    {
+        let types3: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(vec![]));
+        let results3: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(vec![]));
+        let t3 = types3.clone();
+        let r3 = results3.clone();
+        let channel3 = Channel::<AgentEvent>::new(move |body: InvokeResponseBody| {
+            if let InvokeResponseBody::Json(s) = body {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&s) {
+                    let ty = v.get("type").and_then(|x| x.as_str()).unwrap_or("");
+                    if ty == "toolResult" {
+                        r3.lock().push(
+                            v.get("summary").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+                        );
+                    }
+                    t3.lock().push(ty.to_string());
+                }
+            }
+            Ok(())
+        });
+        match crate::pi::run_turn(
+            &state,
+            channel3,
+            "请用 project_snapshot 工具读取项目数据，然后用一句话告诉我这个项目里已经有哪些内容。".into(),
+            vec![],
+        )
+        .await
+        {
+            Ok(_) => {
+                let seen = types3.lock().clone();
+                let has_call = seen.iter().any(|x| x == "toolCall");
+                let has_result = seen.iter().any(|x| x == "toolResult");
+                let summary = results3.lock().first().cloned().unwrap_or_default();
+                if has_call && has_result && !summary.is_empty() {
+                    ok("工具桥", format!("pi 调用了工作台工具，返回：{summary}"));
+                } else {
+                    fail(
+                        "工具桥",
+                        format!(
+                            "没有观察到工具调用（事件：{}）；模型可能没按指令用工具",
+                            seen.join("、")
+                        ),
+                    );
+                }
+            }
+            Err(e) => fail("工具桥", e),
+        }
+    }
+
+    // 审批链路：临时切到「变更前确认」模式，让 pi 调一个写数据的工具，
+    // 自检代替用户「拒绝」，验证 extension 的 tool_call 钩子确实拦住了执行。
+    {
+        let chapters_before = state.current().map(|p| p.script.chapters.len()).unwrap_or(0);
+
+        let mut settings = state.settings();
+        let prev_mode = settings.agent_mode.clone();
+        settings.agent_mode = "confirm".into();
+        let _ = state.save_settings(&settings);
+
+        let types4: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(vec![]));
+        let calls4: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(vec![]));
+        let blocked = Arc::new(Mutex::new(false));
+        let t4 = types4.clone();
+        let c4 = calls4.clone();
+        let b4 = blocked.clone();
+        let st4 = state.clone();
+        let channel4 = Channel::<AgentEvent>::new(move |body: InvokeResponseBody| {
+            if let InvokeResponseBody::Json(s) = body {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&s) {
+                    let ty = v.get("type").and_then(|x| x.as_str()).unwrap_or("");
+                    if ty == "toolCall" {
+                        let name = v.get("name").and_then(|x| x.as_str()).unwrap_or("?");
+                        let nc = v
+                            .get("needsConfirm")
+                            .and_then(|x| x.as_bool())
+                            .unwrap_or(false);
+                        let raw = serde_json::to_string(&v).unwrap_or_default();
+                        c4.lock().push(format!(
+                            "{name}(confirm={nc}) raw={}",
+                            raw.chars().take(150).collect::<String>()
+                        ));
+                        if nc {
+                            // 自检代替用户点「拒绝」
+                            if let Some(id) = v.get("id").and_then(|x| x.as_str()) {
+                                let _ = crate::agent::resolve_approval(&st4, id, false);
+                                *b4.lock() = true;
+                            }
+                        }
+                    }
+                    t4.lock().push(ty.to_string());
+                }
+            }
+            Ok(())
+        });
+
+        let ask = "请调用 script_append_chapter 工具，给项目追加一章，标题用《审批测试章》。";
+        match crate::pi::run_turn(&state, channel4, ask.into(), vec![]).await {
+            Ok(_) => {
+                if *blocked.lock() {
+                    let after = state.current().map(|p| p.script.chapters.len()).unwrap_or(0);
+                    if after == chapters_before {
+                        ok(
+                            "审批链路",
+                            format!("confirm 模式下拦截了写操作，拒绝后章节数保持 {after}"),
+                        );
+                    } else {
+                        fail(
+                            "审批链路",
+                            format!("拒绝后工具仍执行了：章节数 {chapters_before} → {after}"),
+                        );
+                    }
+                } else {
+                    fail(
+                        "审批链路",
+                        format!(
+                            "没有观察到需要确认的工具调用；工具调用：{}；事件：{}",
+                            calls4.lock().join("、"),
+                            types4.lock().join("、")
+                        ),
+                    );
+                    let tail = state.pi.stderr_tail();
+                    if !tail.is_empty() {
+                        println!("      pi stderr（含 extension 日志）：");
+                        for line in tail.iter().rev().take(12).collect::<Vec<_>>().iter().rev() {
+                            println!("        {line}");
+                        }
+                    }
+                }
+            }
+            Err(e) => fail("审批链路", e),
+        }
+
+        // 恢复原权限模式
+        let mut s2 = state.settings();
+        s2.agent_mode = prev_mode;
+        let _ = state.save_settings(&s2);
+    }
+
+    // 重启进程后应恢复同一会话
+    let before = crate::store::read_text_opt(&sess_file).ok().flatten();
+    state.pi.shutdown().await;
+    let types2: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(vec![]));
+    let t2 = types2.clone();
+    let channel2 = Channel::<AgentEvent>::new(move |body: InvokeResponseBody| {
+        if let InvokeResponseBody::Json(s) = body {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&s) {
+                if let Some(ty) = v.get("type").and_then(|x| x.as_str()) {
+                    t2.lock().push(ty.to_string());
+                }
+            }
+        }
+        Ok(())
+    });
+    match crate::pi::run_turn(&state, channel2, "再说一句：刚才我们聊过什么？".into(), vec![]).await
+    {
+        Ok(_) => {
+            let after = crate::store::read_text_opt(&sess_file).ok().flatten();
+            if before.is_some() && before == after {
+                ok("会话恢复", "重启进程后仍是同一个会话文件");
+            } else {
+                fail("会话恢复", format!("会话文件变了：{before:?} → {after:?}"));
+            }
+        }
+        Err(e) => fail("会话恢复（第二轮）", e),
+    }
+
+    state.pi.shutdown().await;
+    FAILURES.load(Ordering::SeqCst) as i32
+}
+
 pub async fn run_pipeline_check() -> i32 {
     let root = std::env::temp_dir().join("duanju-pipeline-check");
     let _ = std::fs::remove_dir_all(&root);
@@ -707,7 +993,7 @@ pub async fn run_pipeline_check() -> i32 {
             state.clone(),
             channel,
             RunOptions {
-                panel: PanelId::Checklist,
+                panel: PanelId::Script,
                 session_id: None,
                 input: "现在做到哪一步了？".into(),
                 image_paths: vec![],

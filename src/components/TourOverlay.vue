@@ -7,7 +7,8 @@
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import {
-  ArrowLeft, ArrowRight, BookOpen, Check, Layers, Sparkles, Terminal, X, Zap,
+  ArrowLeft, ArrowRight, BookOpen, Boxes, Check, Clapperboard, Cpu, Layers, Sparkles,
+  Terminal, X, Zap,
 } from "@lucide/vue";
 import UiButton from "@/ui/Button.vue";
 import { useSettingsStore } from "@/stores/settings";
@@ -25,9 +26,9 @@ const STEPS: Step[] = [
   {
     title: "欢迎来到 Simon 短剧工作台",
     body:
-      "这里把一部短剧的生产拆成九个面板，从剧本一路做到成片。\n" +
-      "助手 Simon 全程参与，能跨面板直接改数据。\n\n" +
-      "大概两分钟看完，之后随时可以在「设置 → 运行环境」里重看。",
+      "九个面板把一部短剧从剧本做到成片，助手 Simon 全程参与：它能跨面板直接改数据、\n" +
+      "调生图生视频、铺时间线。\n\n" +
+      "大约三分钟看完，之后随时能在「设置 → 运行环境」里重看。",
     icon: Sparkles,
   },
   {
@@ -40,7 +41,7 @@ const STEPS: Step[] = [
   {
     title: "左侧是流水线",
     body:
-      "九步按顺序走：剧本 → 风格 → 分镜 → 资产 → 视频提示词 → 生视频 → 剪辑 → 字幕 → 核对。\n" +
+      "九步按顺序走：剧本 → 风格 → 分镜 → 资产 → 3D预演 → 视频提示词 → 生视频 → 剪辑 → 字幕。\n" +
       "每一项右边的数字是完成度，打勾表示这一步做完了。\n\n" +
       "不用严格按顺序，缺什么补什么也行。",
     icon: Layers,
@@ -58,20 +59,53 @@ const STEPS: Step[] = [
     place: "bottom",
   },
   {
-    title: "右下角的 Simon",
+    title: "右下角的 Simon：两种对话引擎",
     body:
-      "点开它，就能让 Simon 干活：拆章节、写分镜、建资产、提交生成、铺时间线。\n" +
-      "它是一个助手 —— 你在哪个面板打开它都行，不受面板限制。\n\n" +
-      "三种权限模式在浮窗顶部切换：\n" +
-      "· YOLO —— 全部直接执行\n" +
-      "· 自动编辑 —— 只有花钱的操作才问你（默认）\n" +
-      "· 变更前确认 —— 改数据前都问一次\n\n" +
-      "拿不准的时候它还会主动弹卡片问你。\n\n" +
-      "输入框里打 @ 可以点名引用技能 / 章节 / 资产，只把需要的东西喂进去；\n" +
-      "顶部那个百分比是上下文水位，快满了会自动压缩，也可以手动压。",
-    icon: Sparkles,
+      "点开浮窗就能让 Simon 干活，它不受面板限制。\n\n" +
+      "输入框下方的引擎按钮可切换：\n" +
+      "· 自研引擎（默认）—— 38 个工具、冻结前缀缓存、花钱确认；\n" +
+      "· pi 引擎 —— 接入开源 agent harness，工具与审批和自研完全一致。\n\n" +
+      "三种权限模式在浮窗顶部：YOLO 全放开 / 自动编辑（默认，只有花钱操作才问）/ 变更前确认。\n" +
+      "输入框打 @ 可以点名引用技能、章节、资产。",
+    icon: Cpu,
     target: "[data-tour='simon']",
     place: "left",
+  },
+  {
+    title: "3D 预演 · 摆场景和转动物体",
+    body:
+      "「3D预演」面板的白模视口铺满整个区域，左上角菜单负责添加：几何体、X Bot / Y Bot、机位。\n\n" +
+      "选中物体后就能变换它，三种方式任选：\n" +
+      "· 拖场景里的彩色手柄（当前档位就是菜单栏点亮的按钮）；\n" +
+      "· 按键盘 G 移动 / R 旋转 / S 缩放 —— 按 R 会出现圆环，拖住圆环转动物体；\n" +
+      "· 右侧属性面板直接填数值（位置 / 旋转按度 / 缩放）。",
+    icon: Boxes,
+    target: "[data-tour='previz-menubar']",
+    place: "bottom",
+  },
+  {
+    title: "3D 预演 · 打关键帧做动画",
+    body:
+      "底部时间轴：拖到某个时刻 → 摆好位置 → 点属性面板的「打关键帧」。\n" +
+      "换个时刻再摆一次、再打一个 → 按空格播放，中间会自动补间（默认缓进缓出，\n" +
+      "点中关键帧可切换线性 / 缓入 / 缓出，也能拖着改时间）。\n\n" +
+      "机位也一样能打关键帧；小键盘 0 进出机位视角看构图，焦距（mm）在属性面板调，\n" +
+      "要给多个机位切换就在机位属性里点「在当前时间加『切到此机位』」。\n" +
+      "角色可以选动作片段（idle / walk…），也能选关节用旋转手柄摆姿势后打关键帧。",
+    icon: Clapperboard,
+    target: "[data-tour='previz-timeline']",
+    place: "top",
+  },
+  {
+    title: "3D 预演 · 导出白模参考视频",
+    body:
+      "菜单栏的「导出白模视频」按项目画幅逐帧渲染（无材质白模）再交给 ffmpeg 合成 mp4，\n" +
+      "落在项目 previz/ 目录，拿去给生视频模型当运镜参考刚好。\n\n" +
+      "如果你的团队用专业预演工具（比如开源的导演台 DirectorDesk），\n" +
+      "也可以两边并行：我们这边出快速白模，它那边做精细灯光运镜。",
+    icon: Clapperboard,
+    target: "[data-tour='previz-export']",
+    place: "bottom",
   },
   {
     title: "把你自己的方法接进来",
@@ -93,7 +127,8 @@ const STEPS: Step[] = [
   {
     title: "可以开始了",
     body:
-      "建议的顺序：先把剧本写完 → 定风格 → 拆分镜 → 建资产出参考图 → 写视频提示词 → 批量生视频 → 铺时间线导出 → 转字幕 → 最后过一遍 Checklist。\n\n" +
+      "建议的顺序：先把剧本写完 → 定风格 → 拆分镜 → 建资产出参考图 → 3D预演摆机位/打动画 → " +
+      "写视频提示词 → 批量生视频 → 铺时间线导出 → 转字幕。\n\n" +
       "随时可以点右下角的 Simon 让它替你干活。",
     icon: Check,
   },

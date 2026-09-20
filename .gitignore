@@ -15,6 +15,9 @@ src-tauri/binaries/ffmpeg
 src-tauri/binaries/ffprobe
 src-tauri/binaries/whisper-cli
 
+# pi 运行时 + whisper 模型（随包分发，由 scripts/prepare-sidecar.mjs 准备）
+src-tauri/sidecar-dist/
+
 # 打包出来的绿色版目录（体积大，由 npm run pack 生成）
 app/
 

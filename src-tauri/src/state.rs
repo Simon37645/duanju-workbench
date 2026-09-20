@@ -12,6 +12,8 @@ use crate::config::ConfigStore;
 use crate::error::{AppError, Result};
 use crate::jobs::JobQueue;
 use crate::models::{AppSettings, ProviderConfig, ProviderKind};
+use crate::pi::PiRuntime;
+use crate::pi_bridge::Bridge;
 use crate::project::Project;
 
 pub const EVENT_PROJECT_CHANGED: &str = "project://changed";
@@ -34,6 +36,10 @@ pub struct AppState {
     pub project: Arc<RwLock<Option<Arc<Project>>>>,
     pub jobs: JobQueue,
     pub agent: Arc<AgentRuntime>,
+    /// pi sidecar（可选引擎，常驻进程）
+    pub pi: Arc<PiRuntime>,
+    /// pi 工具桥（本地 HTTP，extension 回调工具执行与审批）
+    pub pi_bridge: Arc<Bridge>,
     pub http: Arc<RwLock<Option<reqwest::Client>>>,
     pub app: Arc<RwLock<Option<AppHandle>>>,
 }
@@ -45,6 +51,8 @@ impl AppState {
             project: Arc::new(RwLock::new(None)),
             jobs: JobQueue::new(),
             agent: Arc::new(AgentRuntime::default()),
+            pi: Arc::new(PiRuntime::default()),
+            pi_bridge: Arc::new(Bridge::default()),
             http: Arc::new(RwLock::new(None)),
             app: Arc::new(RwLock::new(None)),
         }

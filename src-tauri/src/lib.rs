@@ -19,6 +19,8 @@ pub mod llm;
 pub mod media;
 pub mod models;
 pub mod net;
+pub mod pi;
+pub mod pi_bridge;
 pub mod presets;
 pub mod proc;
 pub mod progress;
@@ -53,6 +55,9 @@ pub fn run() {
             tracing::info!("配置目录: {}", dir.display());
             let state = AppState::new(dir);
             state.attach_app(app.handle().clone());
+            // 随包分发的 whisper 模型首启补种（大文件拷贝，放后台别挡启动）
+            let seed_state = state.clone();
+            tauri::async_runtime::spawn_blocking(move || crate::asr::seed_bundled_models(&seed_state));
             app.manage(state);
             Ok(())
         })
@@ -123,6 +128,12 @@ pub fn run() {
             commands::provider_set_secret,
             commands::secrets_status,
             commands::provider_test,
+            // 3D 预演
+            commands::previz_get,
+            commands::previz_put,
+            commands::previz_render_begin,
+            commands::previz_render_frame,
+            commands::previz_render_finish,
             // 技能
             commands::skill_list,
             commands::skill_read,
@@ -149,8 +160,21 @@ pub fn run() {
             commands::agent_answer,
             commands::agent_context,
             commands::agent_compact,
+            // pi 引擎（sidecar）
+            commands::agent_pi_status,
+            commands::agent_pi_run,
+            commands::agent_pi_abort,
+            commands::agent_pi_history,
             commands::agent_prefix_preview,
         ])
-        .run(tauri::generate_context!())
-        .expect("短剧工作台启动失败");
+        .build(tauri::generate_context!())
+        .expect("短剧工作台启动失败")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                // 退出时收干净 pi sidecar，别给用户留孤儿 node 进程
+                if let Some(state) = app.try_state::<AppState>() {
+                    state.pi.shutdown_now();
+                }
+            }
+        });
 }

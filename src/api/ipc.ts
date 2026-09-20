@@ -189,6 +189,14 @@ export const api = {
   secretsStatus: () => invoke<Record<string, boolean>>("secrets_status"),
   providerTest: (providerId: string) => invoke<string>("provider_test", { providerId }),
 
+  /* ------------------------------------------------------------ 3D预演 */
+  previzGet: () => invoke<unknown>("previz_get"),
+  previzPut: (scene: unknown) => invoke<void>("previz_put", { scene }),
+  previzRenderBegin: () => invoke<string>("previz_render_begin"),
+  previzRenderFrame: (index: number, dataB64: string) =>
+    invoke<void>("previz_render_frame", { index, dataB64 }),
+  previzRenderFinish: (fps: number) => invoke<string>("previz_render_finish", { fps }),
+
   /* ------------------------------------------------------------ 技能 */
   skillList: () => invoke<import("@/types/models").Skill[]>("skill_list"),
   skillRead: (id: string) => invoke<string>("skill_read", { id }),

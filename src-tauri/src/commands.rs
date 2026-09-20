@@ -816,7 +816,8 @@ pub async fn secrets_status(state: State<'_, AppState>) -> Result<std::collectio
     Ok(state.config.secret_status())
 }
 
-/// 测试一家 LLM provider 是否可用（发一条最小请求）。
+/// 测试一家 provider 是否可用。LLM 发一条最小请求；生图/生视频按次计费，
+/// 只走 gen 工厂做配置校验，不发起真实生成。
 #[tauri::command]
 pub async fn provider_test(
     state: State<'_, AppState>,
@@ -826,6 +827,22 @@ pub async fn provider_test(
         .provider(&provider_id)
         .ok_or_else(|| AppError::NotFound(format!("provider 不存在：{provider_id}")))?;
     let key = state.api_key_for(&cfg);
+
+    if matches!(cfg.kind, ProviderKind::Image | ProviderKind::Video) {
+        let provider = crate::gen::build_provider(&state, &cfg, key.clone())?;
+        let key_state = if key.is_some() {
+            "密钥已配置"
+        } else {
+            "未配置密钥（接口需要鉴权时生成会失败）"
+        };
+        return Ok(format!(
+            "配置校验通过：{} 适配器，模型 {}，{}。生图/生视频按次计费，未发送真实请求。",
+            provider.adapter(),
+            provider.model(),
+            key_state
+        ));
+    }
+
     if matches!(cfg.adapter.as_str(), "openai" | "anthropic" | "openai-compatible" | "claude")
         && key.is_none()
     {
@@ -854,6 +871,85 @@ pub async fn provider_test(
         out.usage.input_tokens + out.usage.cache_read_tokens,
         out.usage.output_tokens
     ))
+}
+
+/* ============================================================ 3D预演 */
+
+/// 预演场景（对象 / 角色 / 机位）是前端自治的 JSON，后端只负责落盘。
+#[tauri::command]
+pub async fn previz_get(state: State<'_, AppState>) -> Result<Option<Value>> {
+    let path = state.current()?.paths.workbench().join("previz.json");
+    crate::store::read_json_opt(&path)
+}
+
+#[tauri::command]
+pub async fn previz_put(state: State<'_, AppState>, scene: Value) -> Result<()> {
+    let path = state.current()?.paths.workbench().join("previz.json");
+    crate::store::write_json(&path, &scene)
+}
+
+/* ------------------------------------------- 白模参考视频（逐帧 → ffmpeg） */
+
+/// 开始一帧序列渲染：清空旧帧目录，返回目录路径。
+#[tauri::command]
+pub fn previz_render_begin(state: State<'_, AppState>) -> Result<String> {
+    let dir = state.current()?.paths.workbench().join("previz-frames");
+    if dir.exists() {
+        std::fs::remove_dir_all(&dir)?;
+    }
+    crate::store::ensure_dir(&dir)?;
+    Ok(dir.to_string_lossy().to_string())
+}
+
+/// 收一帧（前端 canvas 导出的 JPEG dataURL）。
+#[tauri::command]
+pub fn previz_render_frame(
+    state: State<'_, AppState>,
+    index: u32,
+    data_b64: String,
+) -> Result<()> {
+    use base64::Engine as _;
+    let raw = data_b64
+        .split_once(',')
+        .map(|(_, b)| b)
+        .unwrap_or(data_b64.as_str());
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(raw)
+        .map_err(|e| AppError::invalid(format!("帧数据解码失败：{e}")))?;
+    let dir = state.current()?.paths.workbench().join("previz-frames");
+    crate::store::write_bytes_atomic(&dir.join(format!("frame_{index:05}.jpg")), &bytes)
+}
+
+/// 把帧序列交给 ffmpeg 合成 mp4，输出到项目 previz/ 目录。
+#[tauri::command]
+pub async fn previz_render_finish(state: State<'_, AppState>, fps: u32) -> Result<String> {
+    let proj = state.current()?;
+    let frames = proj.paths.workbench().join("previz-frames");
+    let out_dir = proj.root().join("previz");
+    crate::store::ensure_dir(&out_dir)?;
+    let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
+    let out = out_dir.join(format!("previz-{stamp}.mp4"));
+    let ffmpeg = crate::media::resolve_tool(&state, "ffmpeg", "")?;
+    let args: Vec<String> = vec![
+        "-y".into(),
+        "-framerate".into(),
+        fps.max(1).to_string(),
+        "-i".into(),
+        frames.join("frame_%05d.jpg").to_string_lossy().to_string(),
+        "-c:v".into(),
+        "libx264".into(),
+        "-pix_fmt".into(),
+        "yuv420p".into(),
+        "-crf".into(),
+        "18".into(),
+        "-movflags".into(),
+        "+faststart".into(),
+        out.to_string_lossy().to_string(),
+    ];
+    crate::media::run(&ffmpeg, &args).await?;
+    // 清掉帧序列（几百 MB，不留着）
+    let _ = std::fs::remove_dir_all(&frames);
+    Ok(out.to_string_lossy().to_string())
 }
 
 /* ============================================================ 媒体/ASR */
@@ -960,6 +1056,40 @@ pub async fn agent_run(
     )
     .await?;
     Ok(sid)
+}
+
+/* ============================================================ pi 引擎 */
+
+/// pi 引擎可用性（是否找到 pi、有没有可用模型、进程是否在跑）
+#[tauri::command]
+pub async fn agent_pi_status(state: State<'_, AppState>) -> Result<crate::pi::PiStatus> {
+    Ok(crate::pi::status(state.inner()).await)
+}
+
+/// 用 pi 引擎跑一轮对话；事件流复用 AgentEvent，前端渲染逻辑不变。
+#[tauri::command]
+pub async fn agent_pi_run(
+    state: State<'_, AppState>,
+    channel: Channel<AgentEvent>,
+    input: String,
+    image_paths: Option<Vec<String>>,
+) -> Result<String> {
+    let st = state.inner().clone();
+    crate::pi::run_turn(&st, channel, input, image_paths.unwrap_or_default()).await
+}
+
+/// 中止 pi 当前回合
+#[tauri::command]
+pub async fn agent_pi_abort(state: State<'_, AppState>) -> Result<()> {
+    state.pi.abort().await;
+    Ok(())
+}
+
+/// pi 会话历史（浮窗切到 pi 引擎时拉取渲染）
+#[tauri::command]
+pub async fn agent_pi_history(state: State<'_, AppState>) -> Result<Vec<Value>> {
+    let st = state.inner().clone();
+    crate::pi::history(&st).await
 }
 
 /// 当前会话的上下文水位

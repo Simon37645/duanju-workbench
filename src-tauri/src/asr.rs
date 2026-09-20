@@ -59,6 +59,32 @@ pub fn models_dir(state: &AppState) -> PathBuf {
     state.config.dir().join("models").join("whisper")
 }
 
+/// 把随安装包分发的模型补进用户模型目录：只补缺失的，不覆盖用户已下的。
+/// 发布包的布局：<安装目录>/models/ggml-*.bin（tauri.conf 的 resources 映射）。
+pub fn seed_bundled_models(state: &AppState) {
+    let Ok(exe) = std::env::current_exe() else { return };
+    let Some(dir) = exe.parent().map(|p| p.join("models")) else {
+        return;
+    };
+    if !dir.is_dir() {
+        return; // 开发环境没有随包模型，正常
+    }
+    let dst_dir = models_dir(state);
+    for (_id, _label, file, _mb, _ml) in model_registry() {
+        let src = dir.join(&file);
+        let dst = dst_dir.join(&file);
+        if src.is_file() && !dst.is_file() {
+            if crate::store::ensure_dir(&dst_dir).is_err() {
+                return;
+            }
+            match std::fs::copy(&src, &dst) {
+                Ok(_) => tracing::info!("已从安装包补种 whisper 模型：{file}"),
+                Err(e) => tracing::warn!("补种 whisper 模型失败 {file}: {e}"),
+            }
+        }
+    }
+}
+
 pub fn model_registry() -> Vec<(String, String, String, u32, bool)> {
     // (id, 显示名, 文件名, 约略 MB, 是否多语言)
     vec![

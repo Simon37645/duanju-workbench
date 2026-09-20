@@ -223,11 +223,11 @@ const progress: PanelProgress[] = [
   { panel: "style", total: 1, done: 1, percent: 100, blockers: [] },
   { panel: "storyboard", total: 4, done: 2, percent: 50, blockers: ["2 章还没有分镜"] },
   { panel: "asset", total: 4, done: 2, percent: 50, blockers: ["6 个视图还没有生成"] },
+  { panel: "previz", total: 2, done: 0, percent: 0, blockers: ["还没有摆放任何预演物体", "还没有添加预演机位"] },
   { panel: "prompt", total: 6, done: 4, percent: 67, blockers: ["还有 2 个镜头没有视频提示词"] },
   { panel: "video", total: 6, done: 3, percent: 50, blockers: ["还有 3 个镜头没有生成视频"] },
   { panel: "edit", total: 3, done: 3, percent: 100, blockers: [] },
   { panel: "subtitle", total: 1, done: 0, percent: 0, blockers: ["还没有生成字幕"] },
-  { panel: "checklist", total: 12, done: 5, percent: 42, blockers: ["还有 7 项自定义检查没勾"] },
 ];
 
 const jobs: Job[] = [
@@ -293,6 +293,16 @@ export async function mockInvoke(cmd: string, args?: Record<string, unknown>): P
       return jobs;
     case "checklist_get":
       return snapshot.checklist;
+    case "previz_get":
+      return null; // 浏览器预览不持久化预演场景，每次都是空场景
+    case "previz_put":
+      return null;
+    case "previz_render_begin":
+      return "mock://previz-frames";
+    case "previz_render_frame":
+      return null;
+    case "previz_render_finish":
+      return "mock://previz.mp4（浏览器预览不真正合成）";
     case "agent_sessions":
       return [
         {

@@ -9,9 +9,13 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import { api, errorText } from "@/api/ipc";
 import { message, toast } from "@/ui";
 import type {
-  AgentEvent, AgentSession, AgentToolCall, ContextStats, PrefixReport, UsageReport,
+  AgentEvent, AgentMessage, AgentSession, AgentToolCall, ContextStats, PiStatus, PrefixReport,
+  UsageReport,
 } from "@/types/agent";
 import type { PanelId } from "@/types/models";
+
+/** 对话引擎：自研（native）或 pi sidecar */
+export type AgentEngine = "native" | "pi";
 
 interface State {
   sessions: AgentSession[];
@@ -31,6 +35,12 @@ interface State {
   compacting: boolean;
   /** 上一次请求的前缀指纹，用来提示「前缀已变，缓存会失效」 */
   lastSentContext: Partial<Record<PanelId, string>>;
+  /** 当前使用的对话引擎 */
+  engine: AgentEngine;
+  /** pi 引擎可用性（未检测时为 null） */
+  piStatus: PiStatus | null;
+  /** pi 会话历史（浮窗渲染用，来自 pi 的 get_messages） */
+  piHistory: AgentMessage[];
 }
 
 export const useAgentStore = defineStore("agent", {
@@ -49,6 +59,15 @@ export const useAgentStore = defineStore("agent", {
     lastError: null,
     compacting: false,
     lastSentContext: {},
+    engine: ((): AgentEngine => {
+      try {
+        return localStorage.getItem("simon.engine") === "pi" ? "pi" : "native";
+      } catch {
+        return "native";
+      }
+    })(),
+    piStatus: null,
+    piHistory: [],
   }),
 
   getters: {
@@ -129,6 +148,10 @@ export const useAgentStore = defineStore("agent", {
     },
 
     async send(panel: PanelId, input: string, imagePaths: string[] = [], refreshContext = false) {
+      if (this.engine === "pi") {
+        await this.sendPi(input, imagePaths);
+        return;
+      }
       if (this.running) {
         message.warning("上一轮还在进行中");
         return;
@@ -167,6 +190,81 @@ export const useAgentStore = defineStore("agent", {
         this.pendingAsk = null;
         await this.refreshSession(sessionId);
         await this.loadSessions();
+      }
+    },
+
+    /* ------------------------------------------------------- pi 引擎 */
+
+    async refreshPiStatus() {
+      try {
+        this.piStatus = await invoke<PiStatus>("agent_pi_status");
+      } catch {
+        this.piStatus = null;
+      }
+      return this.piStatus;
+    },
+
+    /** 拉 pi 会话历史（切到 pi 引擎时调；进程没起来会顺便把它拉起来） */
+    async loadPiHistory() {
+      try {
+        const rows = await invoke<AgentMessage[]>("agent_pi_history");
+        this.piHistory = rows.map((m) => ({ ...m, toolCalls: m.toolCalls ?? [], images: m.images ?? [] }));
+      } catch {
+        this.piHistory = [];
+      }
+    },
+
+    async setEngine(e: AgentEngine) {
+      if (this.running) {
+        message.warning("上一轮还在进行中，先等它结束");
+        return;
+      }
+      this.engine = e;
+      try {
+        localStorage.setItem("simon.engine", e);
+      } catch {
+        /* 隐私模式等场景下 localStorage 不可用，忽略 */
+      }
+      if (e === "pi") {
+        await this.refreshPiStatus();
+        void this.loadPiHistory();
+      }
+    },
+
+    /** pi 引擎跑一轮：事件流与自研引擎同构，渲染逻辑完全复用 */
+    async sendPi(input: string, imagePaths: string[] = []) {
+      if (this.running) {
+        message.warning("上一轮还在进行中");
+        return;
+      }
+      const text = input.trim();
+      if (!text && imagePaths.length === 0) return;
+
+      this.running = true;
+      this.streamText = "";
+      this.streamReasoning = "";
+      this.streamTools = [];
+      this.lastError = null;
+      this.pending = null;
+      this.pendingAsk = null;
+      this.prefix = null; // pi 引擎没有自研的前缀报告
+
+      const channel = new Channel<AgentEvent>();
+      channel.onmessage = (ev: AgentEvent) => this.handleEvent(ev, "pi");
+      try {
+        await invoke<string>("agent_pi_run", { channel, input: text, imagePaths });
+      } catch (e) {
+        this.lastError = errorText(e);
+        message.error(`pi 引擎运行失败：${errorText(e)}`);
+      } finally {
+        this.running = false;
+        this.pending = null;
+        this.pendingAsk = null;
+        // 用 pi 的历史刷新气泡（含刚才这轮），再清流式缓冲避免重复显示
+        await this.loadPiHistory();
+        this.streamText = "";
+        this.streamReasoning = "";
+        this.streamTools = [];
       }
     },
 

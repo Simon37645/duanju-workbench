@@ -145,6 +145,9 @@ pub struct UsageReport {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase", tag = "type")]
 pub enum AgentEvent {
+    // 注意：serde 的容器级 rename_all 只改变体名，**不改 struct variant 的字段**，
+    // 所以每个带多词字段的变体都要单独标 rename_all（前端按 camelCase 读）。
+    #[serde(rename_all = "camelCase")]
     RunStarted {
         run_id: String,
         session_id: String,
@@ -160,6 +163,7 @@ pub enum AgentEvent {
     TextDelta {
         text: String,
     },
+    #[serde(rename_all = "camelCase")]
     ToolCall {
         id: String,
         name: String,
@@ -170,6 +174,7 @@ pub enum AgentEvent {
         mutates: bool,
         needs_confirm: bool,
     },
+    #[serde(rename_all = "camelCase")]
     ToolResult {
         id: String,
         name: String,
@@ -200,6 +205,7 @@ pub enum AgentEvent {
         before: u64,
         after: u64,
     },
+    #[serde(rename_all = "camelCase")]
     RunFinished {
         run_id: String,
         stop_reason: String,
@@ -755,7 +761,8 @@ pub async fn run_turn(
     Ok(session.id)
 }
 
-async fn wait_for_approval(state: &AppState, call_id: &str) -> bool {
+/// 等用户对花钱操作放行。pi 桥接的工具审批复用同一通道。
+pub async fn wait_for_approval(state: &AppState, call_id: &str) -> bool {
     let (tx, rx) = oneshot::channel::<bool>();
     state
         .agent
@@ -805,6 +812,30 @@ pub fn resolve_approval(state: &AppState, call_id: &str, approved: bool) -> bool
         true
     } else {
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 事件必须序列化成前端约定的 camelCase 字段名
+    /// （前端读 needsConfirm；字段名漂移会让审批卡片静默失效）。
+    #[test]
+    fn tool_call_event_uses_camel_case_fields() {
+        let ev = AgentEvent::ToolCall {
+            id: "call_x".into(),
+            name: "script_append_chapter".into(),
+            title: "追加章节".into(),
+            input: serde_json::Value::Null,
+            costly: false,
+            mutates: true,
+            needs_confirm: true,
+        };
+        let s = serde_json::to_string(&ev).unwrap();
+        assert!(s.contains("\"type\":\"toolCall\""), "type 标签不对：{s}");
+        assert!(s.contains("\"needsConfirm\":true"), "needsConfirm 字段不对：{s}");
+        assert!(s.contains("\"mutates\":true"), "mutates 字段不对：{s}");
     }
 }
 

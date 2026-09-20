@@ -9,11 +9,11 @@ export type PanelId =
   | "style"
   | "storyboard"
   | "asset"
+  | "previz"
   | "prompt"
   | "video"
   | "edit"
-  | "subtitle"
-  | "checklist";
+  | "subtitle";
 
 export interface PanelMeta {
   id: PanelId;
@@ -27,11 +27,11 @@ export const PANELS: PanelMeta[] = [
   { id: "style", index: 2, title: "风格", subtitle: "画面风格圣经" },
   { id: "storyboard", index: 3, title: "分镜", subtitle: "镜头表" },
   { id: "asset", index: 4, title: "资产", subtitle: "人物三视图 / 场景 / 物件" },
-  { id: "prompt", index: 5, title: "视频提示词", subtitle: "提示词与资产配对" },
-  { id: "video", index: 6, title: "生视频", subtitle: "调用视频模型出片" },
-  { id: "edit", index: 7, title: "剪辑", subtitle: "时间线与导出" },
-  { id: "subtitle", index: 8, title: "字幕", subtitle: "whisper 转写" },
-  { id: "checklist", index: 9, title: "Checklist", subtitle: "进度核对" },
+  { id: "previz", index: 5, title: "3D预演", subtitle: "白模走位 / 机位设计" },
+  { id: "prompt", index: 6, title: "视频提示词", subtitle: "提示词与资产配对" },
+  { id: "video", index: 7, title: "生视频", subtitle: "调用视频模型出片" },
+  { id: "edit", index: 8, title: "剪辑", subtitle: "时间线与导出" },
+  { id: "subtitle", index: 9, title: "字幕", subtitle: "whisper 转写" },
 ];
 
 /** 面板完成度，由后端按数据实时判定（src-tauri/src/progress.rs） */

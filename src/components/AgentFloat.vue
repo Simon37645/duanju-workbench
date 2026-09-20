@@ -40,7 +40,9 @@ const autoScroll = ref(true);
 const showReasoning = ref<Record<string, boolean>>({});
 
 const session = computed(() => agent.current);
-const messages = computed(() => session.value?.display ?? []);
+const messages = computed(() =>
+  agent.engine === "pi" ? agent.piHistory : (session.value?.display ?? []),
+);
 const modelLabel = computed(() => {
   const p = settings.activeLlm;
   return p ? p.model || p.name : "未配置模型";
@@ -256,7 +258,7 @@ const quickPrompts = computed(() => {
     video: ["批量生成还没出片的镜头", "看看哪几条失败了"],
     edit: ["按镜头顺序铺时间线", "导出成片"],
     subtitle: ["用时间线第一个片段转写字幕"],
-    checklist: ["汇报现在的完成度", "哪些还没做完"],
+    previz: ["帮我摆一组客厅对话的白模和机位", "看看现在的机位怎么调整更好"],
   };
   return map[props.panel] ?? [];
 });
@@ -264,12 +266,42 @@ const quickPrompts = computed(() => {
 onMounted(async () => {
   await agent.loadSessions();
   await agent.refreshContext();
+  void agent.refreshPiStatus();
   try {
     skills.value = (await api.skillList()).filter((s) => s.enabled);
   } catch {
     skills.value = [];
   }
 });
+
+/* ------------------------------------------------------------ 引擎切换 */
+
+const engineHint = computed(() => {
+  const s = agent.piStatus;
+  if (agent.engine === "pi") {
+    return `pi 引擎（${s?.version ? "v" + s.version : "已启用"}）：${s?.detail ?? "状态未知"}。点击切回自研引擎`;
+  }
+  if (!s) return "pi 引擎状态未知（点击检测）";
+  return s.available
+    ? `切换到 pi 引擎${s.version ? "（v" + s.version + "）" : ""}`
+    : `pi 引擎暂不可用：${s.detail}`;
+});
+
+async function toggleEngine() {
+  if (agent.running) return;
+  if (agent.engine === "pi") {
+    await agent.setEngine("native");
+    toast.info("已切回自研引擎");
+    return;
+  }
+  const s = await agent.refreshPiStatus();
+  if (!s?.available) {
+    toast.warn(`pi 引擎不可用：${s?.detail ?? "未检测到"}`);
+    return;
+  }
+  await agent.setEngine("pi");
+  toast.ok("已切换到 pi 引擎（sidecar 常驻，首次对话约 1~2 秒启动）");
+}
 
 async function newChat() {
   await agent.newSession(props.panel);
@@ -354,8 +386,8 @@ async function removeSession(id: string) {
             <Zap :size="9" /> {{ cacheRate }}%
           </UiBadge>
 
-          <!-- 对话列表 -->
-          <UiPopover :width="290" placement="bottom-end">
+          <!-- 对话列表（自研引擎的会话；pi 引擎的会话由 sidecar 自己管理） -->
+          <UiPopover v-if="agent.engine !== 'pi'" :width="290" placement="bottom-end">
             <template #trigger>
               <UiButton variant="subtle" size="xs" icon title="对话列表">
                 <template #icon><ChevronDown :size="13" /></template>
@@ -394,7 +426,11 @@ async function removeSession(id: string) {
             </div>
           </UiPopover>
 
-          <UiTooltip placement="bottom" content="让 Simon 重新读取项目状态（会牺牲一次缓存命中）">
+          <UiTooltip
+            v-if="agent.engine !== 'pi'"
+            placement="bottom"
+            content="让 Simon 重新读取项目状态（会牺牲一次缓存命中）"
+          >
             <UiButton variant="subtle" size="xs" icon :disabled="agent.running" @click="refreshContext">
               <template #icon><RefreshCw :size="13" /></template>
             </UiButton>
@@ -575,6 +611,15 @@ async function removeSession(id: string) {
             <div class="row" style="gap: 4px">
               <UiButton variant="subtle" size="xs" icon @click="attach">
                 <template #icon><ImagePlus :size="13" /></template>
+              </UiButton>
+              <UiButton
+                variant="subtle"
+                size="xs"
+                :title="engineHint"
+                :disabled="agent.running"
+                @click="toggleEngine"
+              >
+                {{ agent.engine === "pi" ? "pi 引擎" : "自研引擎" }}
               </UiButton>
               <span class="t-xs faint">Ctrl+Enter 发送</span>
             </div>

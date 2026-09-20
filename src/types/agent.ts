@@ -137,6 +137,15 @@ export interface AgentSession {
   updatedAt: string;
 }
 
+/** pi sidecar 引擎的状态（后端 src-tauri/src/pi.rs） */
+export interface PiStatus {
+  available: boolean;
+  running: boolean;
+  detail: string;
+  path: string | null;
+  version: string | null;
+}
+
 export interface AgentRunOptions {
   /** 用户输入的文本 */
   input: string;

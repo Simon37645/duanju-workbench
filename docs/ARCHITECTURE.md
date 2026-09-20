@@ -30,6 +30,8 @@ src/views/panels/  九个面板
 ┌───────────────▼───────────────── Rust 后端 ───────────────────────┐
 │  commands.rs      前端唯一入口（薄封装）                            │
 │  agent/           会话、工具循环、缓存友好提示词装配、38 个工具        │
+│  pi.rs            pi sidecar（RPC）：可选对话引擎，常驻进程 + 事件映射  │
+│  pi_bridge.rs     pi 工具桥：本地 HTTP，extension ↔ Rust 的工具与审批   │
 │  actions.rs       高层动作（生图/生视频/铺轨/导出/转写）             │
 │  llm/             openai / anthropic / mock 适配器 + SSE 解析       │
 │  gen/             generic-http（配置驱动）+ mock                    │
@@ -119,10 +121,10 @@ OpenAI 兼容端点靠自动前缀缓存，客户端能做的是让前缀逐字�
 
 `progress.rs` 是唯一实现，两处消费：
 
-- `project_progress` 命令 → 左侧导航徽标、Checklist 面板
+- `project_progress` 命令 → 左侧导航徽标
 - `checklist_report` 工具 → agent 想知道「还差什么」
 
-Checklist 面板里的**自动项**由它实时算出来，不落盘；用户和 agent 能改的只有自定义项。
+面板完成度里的**自动项**由它实时算出来，不落盘；用户和 agent 能改的只有自定义项。
 这样不会出现「勾了但数据其实没做完」的假象。
 
 ### 6. 权限模式与人工介入

@@ -396,6 +396,8 @@ const planOptions = Object.entries(VIEW_LABEL).map(([value, label]) => ({ label,
 
 <style scoped>
 .layout {
+  flex: 1;
+  min-width: 0;
   display: flex;
   gap: var(--sp-3);
   height: 100%;

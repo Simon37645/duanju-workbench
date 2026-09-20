@@ -284,6 +284,8 @@ function askAgent() {
 
 <style scoped>
 .layout {
+  flex: 1;
+  min-width: 0;
   display: flex;
   gap: var(--sp-3);
   height: 100%;

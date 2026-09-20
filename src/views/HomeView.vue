@@ -31,11 +31,11 @@ const FLOW = [
   { name: "风格", desc: "定画面风格圣经，下游共享" },
   { name: "分镜", desc: "把剧本拆成可拍的镜头表" },
   { name: "资产", desc: "人物三视图、场景、道具出图" },
+  { name: "3D预演", desc: "白模走位与机位设计" },
   { name: "提示词", desc: "写运动提示词并配参考图" },
   { name: "生视频", desc: "调视频模型按镜头出片" },
   { name: "剪辑", desc: "铺时间线、裁切、导出成片" },
   { name: "字幕", desc: "本地 whisper 转写与校对" },
-  { name: "核对", desc: "Checklist 过一遍再交片" },
 ];
 
 async function pickParent() {

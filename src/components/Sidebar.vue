@@ -2,8 +2,8 @@
 import { computed } from "vue";
 import { useRouter } from "vue-router";
 import {
-  BookText, Captions, Check, Clapperboard, FolderOpen, Images, LayoutGrid,
-  ListChecks, Palette, Scissors, Settings, Sparkles, Sun, Moon,
+  Axis3d, BookText, Captions, Check, Clapperboard, FolderOpen, Images, LayoutGrid,
+  Palette, Scissors, Settings, Sparkles, Sun, Moon,
 } from "@lucide/vue";
 import { PANELS, type PanelId } from "@/types/models";
 import { useProjectStore } from "@/stores/project";
@@ -25,7 +25,7 @@ const ICONS: Record<PanelId, unknown> = {
   video: Clapperboard,
   edit: Scissors,
   subtitle: Captions,
-  checklist: ListChecks,
+  previz: Axis3d,
 };
 
 const rows = computed(() =>

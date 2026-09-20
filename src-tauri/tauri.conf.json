@@ -41,7 +41,11 @@
       "icons/icon.ico"
     ],
     "externalBin": ["binaries/ffmpeg", "binaries/ffprobe"],
-    "resources": [],
+    "resources": {
+      "sidecar-dist/bin": "binaries",
+      "sidecar-dist/pi": "sidecar/pi",
+      "sidecar-dist/models": "models"
+    },
     "windows": {
       "nsis": {
         "languages": ["SimpChinese", "English"]

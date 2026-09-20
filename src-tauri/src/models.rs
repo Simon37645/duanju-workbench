@@ -30,6 +30,7 @@ pub enum PanelId {
     Edit,
     Subtitle,
     Checklist,
+    Previz,
 }
 
 impl PanelId {
@@ -44,20 +45,24 @@ impl PanelId {
             PanelId::Edit => "edit",
             PanelId::Subtitle => "subtitle",
             PanelId::Checklist => "checklist",
+            PanelId::Previz => "previz",
         }
     }
 
+    /// 面板顺序 = 侧栏导航与进度列表的顺序。
+    /// 注意 Checklist 变体保留但不在列表里：取消面板后旧项目 JSON 里的
+    /// `panel: "checklist"`（自定义检查项）仍要能反序列化，不能删变体。
     pub fn all() -> Vec<PanelId> {
         vec![
             PanelId::Script,
             PanelId::Style,
             PanelId::Storyboard,
             PanelId::Asset,
+            PanelId::Previz,
             PanelId::Prompt,
             PanelId::Video,
             PanelId::Edit,
             PanelId::Subtitle,
-            PanelId::Checklist,
         ]
     }
 }

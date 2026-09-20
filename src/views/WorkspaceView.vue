@@ -28,7 +28,7 @@ const PANEL_COMPONENTS: Record<PanelId, ReturnType<typeof defineAsyncComponent>>
   video: defineAsyncComponent(() => import("@/views/panels/VideoPanel.vue")),
   edit: defineAsyncComponent(() => import("@/views/panels/EditPanel.vue")),
   subtitle: defineAsyncComponent(() => import("@/views/panels/SubtitlePanel.vue")),
-  checklist: defineAsyncComponent(() => import("@/views/panels/ChecklistPanel.vue")),
+  previz: defineAsyncComponent(() => import("@/views/panels/PrevizPanel.vue")),
 };
 
 const activePanel = computed<PanelId>(() => {
