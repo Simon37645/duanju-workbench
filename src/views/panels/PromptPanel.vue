@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { Check, ImagePlus, Sparkles, Wand2, X } from "@lucide/vue";
+import { Check, Eye, ImagePlus, Sparkles, Wand2, X } from "@lucide/vue";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useProjectStore } from "@/stores/project";
 import { useAgentStore } from "@/stores/agent";
-import { errorText } from "@/api/ipc";
+import { api, errorText } from "@/api/ipc";
+import { fileUrl } from "@/api/events";
 import { toast } from "@/ui";
 import UiButton from "@/ui/Button.vue";
 import UiBadge from "@/ui/Badge.vue";
@@ -13,6 +15,7 @@ import UiTextarea from "@/ui/Textarea.vue";
 import UiSelect from "@/ui/Select.vue";
 import UiField from "@/ui/Field.vue";
 import UiEmpty from "@/ui/Empty.vue";
+import UiModal from "@/ui/Modal.vue";
 import type { AssetRef, Shot, VideoPrompt } from "@/types/models";
 
 const project = useProjectStore();
@@ -21,6 +24,52 @@ const agent = useAgentStore();
 const chapterId = ref("all");
 const currentShotId = ref<string | null>(null);
 const form = ref<VideoPrompt | null>(null);
+
+/* --------------------------------- 完整提示词预览（含风格）与本地参考图 */
+
+const previewOpen = ref(false);
+const previewData = ref<{ prompt: string; negative: string } | null>(null);
+
+async function openPreview() {
+  if (!form.value?.id) return toast.info("先把这条提示词保存一下再预览");
+  previewOpen.value = true;
+  previewData.value = null;
+  try {
+    previewData.value = await api.videoPromptPreview(form.value.id);
+  } catch (e) {
+    previewData.value = { prompt: errorText(e), negative: "" };
+  }
+}
+
+async function saveRefs(refs: string[]) {
+  const f = form.value;
+  if (!f) return;
+  const updated = { ...f, refImages: refs };
+  form.value = updated;
+  try {
+    await project.upsertPrompt(updated);
+    toast.ok("参考图已更新");
+  } catch (e) {
+    toast.err(errorText(e));
+  }
+}
+
+async function pickLocalRefs() {
+  const picked = await openDialog({ multiple: true, title: "选择参考图" });
+  const list = Array.isArray(picked) ? picked : picked ? [picked] : [];
+  if (!form.value || !list.length) return;
+  const refs = [...(form.value.refImages ?? [])];
+  for (const p of list) {
+    const s = String(p);
+    if (!refs.includes(s)) refs.push(s);
+  }
+  await saveRefs(refs);
+}
+
+async function removeRef(path: string) {
+  if (!form.value) return;
+  await saveRefs((form.value.refImages ?? []).filter((x) => x !== path));
+}
 
 const chapters = computed(() => project.chapters);
 const shots = computed(() =>
@@ -173,6 +222,9 @@ const shotOf = (id: string) => project.shots.find((s) => s.id === id);
           </div>
           <div class="row" style="gap: 4px">
             <UiButton variant="subtle" size="xs" @click="autoBind">按人物配图</UiButton>
+            <UiButton variant="subtle" size="xs" @click="openPreview">
+              <Eye :size="12" /> 完整提示词
+            </UiButton>
             <UiButton variant="primary" size="sm" @click="save">
               <template #icon><Check :size="12" /></template>
               保存
@@ -276,6 +328,41 @@ const shotOf = (id: string) => project.shots.find((s) => s.id === id);
         <template #icon><ImagePlus :size="26" /></template>
       </UiEmpty>
     </section>
+
+    <!-- 视频完整提示词（含自动拼接的风格）+ 本地参考图 -->
+    <UiModal
+      :show="previewOpen"
+      title="视频完整提示词"
+      :width="560"
+      @update:show="(v: boolean) => (previewOpen = v)"
+    >
+      <div class="col" style="gap: 12px">
+        <div class="t-xs faint">
+          生成视频时风格圣经的词会自动拼在最前（和资产图同样的规则），下面是最终发给模型的版本
+        </div>
+        <div class="col" style="gap: 4px">
+          <span class="section-label">提示词</span>
+          <pre class="pv">{{ previewData?.prompt ?? "读取中…" }}</pre>
+        </div>
+        <div class="col" style="gap: 4px">
+          <span class="section-label">负面词</span>
+          <pre class="pv">{{ previewData?.negative || "（无）" }}</pre>
+        </div>
+        <div class="col" style="gap: 6px">
+          <span class="section-label">本地参考图（随生成一起提交）</span>
+          <div v-if="(form?.refImages ?? []).length" class="row wrap" style="gap: 6px">
+            <div v-for="r in form?.refImages ?? []" :key="r" class="refchip">
+              <img :src="fileUrl(r)" alt="" />
+              <button class="refdel" title="移除" @click="removeRef(r)">×</button>
+            </div>
+          </div>
+          <div class="row" style="gap: 6px">
+            <UiButton variant="outline" size="sm" @click="pickLocalRefs">本地文件…</UiButton>
+            <span class="t-xs faint">资产的配对参考图在下方「参考」区选择</span>
+          </div>
+        </div>
+      </div>
+    </UiModal>
   </div>
 </template>
 
@@ -356,5 +443,51 @@ const shotOf = (id: string) => project.shots.find((s) => s.id === id);
   display: flex;
   flex-direction: column;
   gap: var(--sp-3);
+}
+/* 完整提示词预览 */
+.pv {
+  margin: 0;
+  padding: 10px 12px;
+  max-height: 220px;
+  overflow: auto;
+  background: var(--surface-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  color: var(--fg-dim);
+  font-size: 12px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.refchip {
+  position: relative;
+}
+.refchip img {
+  width: 56px;
+  height: 56px;
+  object-fit: cover;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line);
+  display: block;
+}
+.refdel {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  border: none;
+  background: var(--surface-5);
+  color: var(--fg);
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+}
+.refdel:hover {
+  background: var(--err);
+  color: #fff;
 }
 </style>

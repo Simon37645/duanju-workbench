@@ -343,6 +343,17 @@ pub async fn run_turn(
 
     // 4) 工具循环
     for round in 0..max_rounds {
+        // 用户点了「停止」：不再继续后续轮次（正在执行的那一步会跑完）
+        if state.agent.abort_requests.lock().remove(&session.id) {
+            stop_reason = "aborted".into();
+            send(
+                &channel,
+                AgentEvent::Error {
+                    message: "已被用户停止（当前步骤已收尾）".into(),
+                },
+            );
+            break;
+        }
         send(&channel, AgentEvent::Round { round: round + 1 });
 
         // 进模型之前先看上下文水位；超了就压缩（第一刀免费，必要时才花一次调用）

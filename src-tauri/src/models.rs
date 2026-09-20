@@ -338,6 +338,9 @@ pub struct AssetView {
     pub label: String,
     pub prompt: String,
     pub negative: String,
+    /// 手动参考图（本地文件或已生成资产图的路径），生成时与自动一致性参考图一起使用
+    #[serde(default)]
+    pub ref_images: Vec<String>,
     pub file: Option<String>,
     pub thumb: Option<String>,
     pub seed: Option<i64>,
@@ -394,6 +397,9 @@ pub struct VideoPrompt {
     pub last_frame: Option<AssetRef>,
     #[serde(default)]
     pub refs: Vec<AssetRef>,
+    /// 手动参考图（本地文件路径），与 refs 的资产引用并存
+    #[serde(default)]
+    pub ref_images: Vec<String>,
     pub model_hint: Option<String>,
     pub seed: Option<i64>,
     pub status: PromptStatus,

@@ -1065,6 +1065,7 @@ async fn t_asset_plan_views(ctx: ToolCtx, args: Value) -> Result<ToolOutcome> {
             }
             planned.push(AssetView {
                 id: new_id("vw"),
+                ref_images: vec![],
                 kind,
                 label,
                 prompt: v
@@ -1343,6 +1344,7 @@ async fn t_prompt_upsert(ctx: ToolCtx, args: Value) -> Result<ToolOutcome> {
                 .map(|x| x.id.clone())
                 .unwrap_or_else(|| new_id("vp")),
             shot_id: shot_id.clone(),
+            ref_images: vec![],
             index: shot_index,
             prompt: arg_opt_str(&args, "prompt")
                 .or_else(|| prev.as_ref().map(|x| x.prompt.clone()))
@@ -1491,6 +1493,7 @@ async fn t_prompt_autofill(ctx: ToolCtx, args: Value) -> Result<ToolOutcome> {
             let first = refs.first().cloned();
             p.prompts.push(VideoPrompt {
                 id: new_id("vp"),
+                ref_images: vec![],
                 shot_id: shot.id.clone(),
                 index: shot.index,
                 prompt: text,
@@ -1834,15 +1837,10 @@ fn parse_panel(s: &str) -> Result<PanelId> {
 
 /* ============================ 3D 预演（导演台） ============================ */
 
-/// 读导演台工程（前端 iframe 里的 window.__director.getDocument）
+/// 读导演台工程现状（走它的 director_read —— 为 agent 设计的友好读取）
 async fn director_scene(ctx: ToolCtx, _args: Value) -> Result<ToolOutcome> {
-    let v = crate::director::call_director(&ctx.state, "__get_document", json!({})).await?;
-    let scenes = v
-        .get("scenes")
-        .and_then(|s| s.as_array())
-        .map(|a| a.len())
-        .unwrap_or(0);
-    Ok(ToolOutcome::new(format!("已读取导演台工程（{scenes} 个戏段）"), v))
+    let v = crate::director::call_director(&ctx.state, "director_read", json!({})).await?;
+    Ok(ToolOutcome::new("已读取导演台工程现状", v))
 }
 
 /// 调导演台自己的工具编辑工程
@@ -2233,7 +2231,7 @@ pub fn registry(_panel: PanelId) -> Vec<Tool> {
     tools.push(tool!(
         "director_scene",
         "读取 3D 预演工程",
-        "读取「3D预演 · 导演台」的当前工程：场景、人物、走位路径、机位与时间轴。要了解预演现状、或打算改动它之前先调用。需要用户在「3D预演」面板里切到「导演台」模式。",
+        "读取「3D预演 · 导演台」的当前工程现状（场景、人物、机位、时间轴）。要了解预演现状、或打算改动它之前先调用。",
         schema::empty(),
         false,
         director_scene
@@ -2241,7 +2239,14 @@ pub fn registry(_panel: PanelId) -> Vec<Tool> {
     tools.push(tool!(
         "director_tool",
         "操作 3D 预演（导演台）",
-        "调用导演台的能力编辑预演工程：布景、人物走位、运镜与镜头效果、灯光等。name 传它的工具名、args 传参数对象。先读 director_scene 了解现状再改；返回执行结果。",
+        "调用导演台的能力编辑预演工程（布景 / 走位 / 运镜 / 灯光等）。name 必须是它自己的工具名：\
+director_skill（先读它拿操作说明与用法，最保险的第一步）、director_read（读现状，优先用它而不是猜）、\
+director_apply（执行编辑，最常用）、\
+director_scene / director_nodes / director_spatial / director_path_surface（场景、层级、空间与路径）、\
+director_assets / director_motions / director_media（资产库、动作库与素材）、\
+director_view / director_export / director_continuity / director_scan / director_history / director_help / director_job / director_stride。\
+建议流程：director_skill 拿说明 → director_read 看现状 → director_apply 改。args 传该工具的参数对象。\
+需要用户先在「3D预演」面板打开导演台。",
         schema::director_tool(),
         false,
         director_action

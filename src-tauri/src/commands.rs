@@ -952,6 +952,55 @@ pub async fn previz_render_finish(state: State<'_, AppState>, fps: u32) -> Resul
     Ok(out.to_string_lossy().to_string())
 }
 
+/* ============================================================ 生成预览 */
+
+/// 预览某个资产视图最终发给模型的完整提示词（含风格前缀 / 固定特征）。
+#[tauri::command]
+pub fn asset_prompt_preview(
+    state: State<'_, AppState>,
+    asset_id: String,
+    view_id: String,
+) -> Result<Value> {
+    let p = state.current()?;
+    let asset = p
+        .assets
+        .iter()
+        .find(|a| a.id == asset_id)
+        .ok_or_else(|| AppError::NotFound("资产不存在".into()))?;
+    let view = asset
+        .views
+        .iter()
+        .find(|v| v.id == view_id)
+        .ok_or_else(|| AppError::NotFound("视图不存在".into()))?;
+    Ok(serde_json::json!({
+        "prompt": crate::actions::compose_image_prompt(&p, asset, view),
+        "negative": crate::actions::compose_image_negative(&p, view),
+    }))
+}
+
+/// 预览某个镜头视频生成时最终使用的完整提示词（含风格前缀）。
+#[tauri::command]
+pub fn video_prompt_preview(state: State<'_, AppState>, prompt_id: String) -> Result<Value> {
+    let p = state.current()?;
+    let pr = p
+        .prompts
+        .iter()
+        .find(|x| x.id == prompt_id)
+        .ok_or_else(|| AppError::NotFound("提示词不存在".into()))?;
+    let shoot = p.shots.iter().find(|s| s.id == pr.shot_id);
+    let raw = if pr.prompt.trim().is_empty() {
+        shoot
+            .map(|s| format!("{}，{}，{}", s.action, s.shot_size, s.camera_move))
+            .unwrap_or_default()
+    } else {
+        pr.prompt.clone()
+    };
+    Ok(serde_json::json!({
+        "prompt": crate::actions::compose_video_prompt(&p, &raw),
+        "negative": crate::actions::compose_video_negative(&p, &pr.negative),
+    }))
+}
+
 /* ============================================================ 媒体/ASR */
 
 #[tauri::command]
@@ -1120,6 +1169,13 @@ pub async fn agent_pi_run(
 #[tauri::command]
 pub async fn agent_pi_abort(state: State<'_, AppState>) -> Result<()> {
     state.pi.abort().await;
+    Ok(())
+}
+
+/// 停止自研引擎的当前回合：在下一个轮次/工具边界生效（不打断正在进行的 HTTP 请求）
+#[tauri::command]
+pub fn agent_abort(state: State<'_, AppState>, session_id: String) -> Result<()> {
+    state.agent.abort_requests.lock().insert(session_id);
     Ok(())
 }
 

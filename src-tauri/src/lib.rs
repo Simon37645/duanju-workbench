@@ -139,6 +139,9 @@ pub fn run() {
             commands::director_save,
             commands::director_load,
             commands::director_result,
+            // 生成预览（完整提示词）
+            commands::asset_prompt_preview,
+            commands::video_prompt_preview,
             // 技能
             commands::skill_list,
             commands::skill_read,
@@ -161,6 +164,7 @@ pub fn run() {
             commands::agent_session_delete,
             commands::agent_session_new,
             commands::agent_run,
+            commands::agent_abort,
             commands::agent_approve,
             commands::agent_answer,
             commands::agent_context,

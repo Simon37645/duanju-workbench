@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
-import { ImageOff, Images, Layers, Plus, Sparkles, Trash2, Wand2, Zap } from "@lucide/vue";
+import { ImageOff, Images, Layers, Plus, Sparkles, Trash2, Wand2, Zap, Eye } from "@lucide/vue";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { useProjectStore } from "@/stores/project";
 import { useJobsStore } from "@/stores/jobs";
 import { useAgentStore } from "@/stores/agent";
-import { errorText } from "@/api/ipc";
+import { api, errorText } from "@/api/ipc";
 import { fileUrl } from "@/api/events";
 import { toast, confirmDialog } from "@/ui";
 import UiButton from "@/ui/Button.vue";
@@ -22,6 +23,72 @@ import UiCheckbox from "@/ui/Checkbox.vue";
 import type { Asset, AssetKind, AssetStatus, AssetView, ViewKind } from "@/types/models";
 
 const project = useProjectStore();
+
+/* --------------------------------------- 完整提示词预览与参考图管理 */
+
+const previewOpen = ref(false);
+const previewData = ref<{ prompt: string; negative: string } | null>(null);
+const previewView = ref<{ asset: Asset; view: AssetView } | null>(null);
+
+/** 可作参考图的图：所有资产里已出图的视图 */
+const assetImageOptions = computed(() => {
+  const out: { label: string; value: string }[] = [];
+  for (const a of project.assets) {
+    for (const v of a.views) {
+      if (v.file) out.push({ label: `${a.name} · ${v.label}`, value: v.file });
+    }
+  }
+  return out;
+});
+
+async function openPreview(asset: Asset, view: AssetView) {
+  previewView.value = { asset, view };
+  previewData.value = null;
+  previewOpen.value = true;
+  try {
+    previewData.value = await api.assetPromptPreview(asset.id, view.id);
+  } catch (e) {
+    previewData.value = { prompt: errorText(e), negative: "" };
+  }
+}
+
+async function updateViewRefs(refs: string[]) {
+  const pv = previewView.value;
+  if (!pv) return;
+  const updated: Asset = {
+    ...pv.asset,
+    views: pv.asset.views.map((v) => (v.id === pv.view.id ? { ...v, refImages: refs } : v)),
+  };
+  try {
+    await api.assetUpsert(updated);
+    await project.reload();
+    const fresh = project.assets.find((a) => a.id === pv.asset.id);
+    const fv = fresh?.views.find((v) => v.id === pv.view.id);
+    if (fresh && fv) previewView.value = { asset: fresh, view: fv };
+  } catch (e) {
+    toast.err(errorText(e));
+  }
+}
+
+async function addAssetRef(path: string | null) {
+  const pv = previewView.value;
+  if (!path || !pv) return;
+  const refs = [...(pv.view.refImages ?? [])];
+  if (!refs.includes(path)) refs.push(path);
+  await updateViewRefs(refs);
+}
+
+async function pickLocalRefs() {
+  const picked = await openDialog({ multiple: true, title: "选择参考图" });
+  const list = Array.isArray(picked) ? picked : picked ? [picked] : [];
+  for (const p of list) await addAssetRef(String(p));
+}
+
+async function removeRef(path: string) {
+  const pv = previewView.value;
+  if (!pv) return;
+  await updateViewRefs((pv.view.refImages ?? []).filter((x) => x !== path));
+}
 const jobs = useJobsStore();
 const agent = useAgentStore();
 
@@ -320,14 +387,19 @@ const planOptions = Object.entries(VIEW_LABEL).map(([value, label]) => ({ label,
               <div v-if="v.error" class="t-xs truncate" style="color: var(--err)" :title="v.error">
                 {{ v.error }}
               </div>
-              <UiButton
-                variant="subtle"
-                size="xs"
-                block
-                @click="generate(current, [v.id], v.status === 'done')"
-              >
-                {{ v.status === "done" ? "重新生成" : "生成" }}
-              </UiButton>
+              <div class="row" style="gap: 4px">
+                <UiButton variant="subtle" size="xs" style="flex: 1" @click="openPreview(current!, v)">
+                  <Eye :size="12" /> 提示词
+                </UiButton>
+                <UiButton
+                  variant="subtle"
+                  size="xs"
+                  style="flex: 1"
+                  @click="generate(current, [v.id], v.status === 'done')"
+                >
+                  {{ v.status === "done" ? "重新生成" : "生成" }}
+                </UiButton>
+              </div>
             </div>
           </div>
         </div>
@@ -339,9 +411,50 @@ const planOptions = Object.entries(VIEW_LABEL).map(([value, label]) => ({ label,
       </UiEmpty>
     </section>
 
+    <!-- 完整提示词 + 参考图 -->
+    <UiModal
+      :show="previewOpen"
+      title="完整提示词与参考图"
+      :width="580"
+      @update:show="(v: boolean) => (previewOpen = v)"
+    >
+      <div v-if="previewView" class="col" style="gap: 12px">
+        <div class="t-xs faint">
+          {{ previewView.asset.name }} · {{ previewView.view.label }}（生成时风格词会自动拼在最前）
+        </div>
+        <div class="col" style="gap: 4px">
+          <span class="section-label">提示词（最终发给模型）</span>
+          <pre class="pv">{{ previewData?.prompt ?? "读取中…" }}</pre>
+        </div>
+        <div class="col" style="gap: 4px">
+          <span class="section-label">负面词</span>
+          <pre class="pv">{{ previewData?.negative || "（无）" }}</pre>
+        </div>
+        <div class="col" style="gap: 6px">
+          <span class="section-label">参考图（随生成一起提交，用于保持一致性）</span>
+          <div v-if="(previewView.view.refImages ?? []).length" class="row wrap" style="gap: 6px">
+            <div v-for="r in previewView.view.refImages ?? []" :key="r" class="refchip">
+              <img :src="fileUrl(r)" alt="" />
+              <button class="refdel" title="移除" @click="removeRef(r)">×</button>
+            </div>
+          </div>
+          <div class="row wrap" style="gap: 6px">
+            <div style="width: 230px">
+              <UiSelect
+                :model-value="''"
+                :options="assetImageOptions"
+                placeholder="从已生成的资产图里选…"
+                @update:model-value="addAssetRef"
+              />
+            </div>
+            <UiButton variant="outline" size="sm" @click="pickLocalRefs">本地文件…</UiButton>
+          </div>
+        </div>
+      </div>
+    </UiModal>
+
     <!-- 新建 -->
-    <UiModal :show="showNew" title="新建资产" :width="440" @update:show="(v: boolean) => (showNew = v)">
-      <div class="col" style="gap: 12px">
+    <UiModal :show="showNew" title="新建资产" :width="440" @update:show="(v: boolean) => (showNew = v)">      <div class="col" style="gap: 12px">
         <div class="grid2">
           <UiField label="类型">
             <UiSelect v-model="newAsset.kind" :options="KINDS" />
@@ -527,4 +640,46 @@ const planOptions = Object.entries(VIEW_LABEL).map(([value, label]) => ({ label,
   grid-template-columns: repeat(3, 1fr);
   gap: 8px 12px;
 }
+
+/* 完整提示词预览与参考图 */
+.pv {
+  margin: 0;
+  padding: 10px 12px;
+  max-height: 220px;
+  overflow: auto;
+  background: var(--surface-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  color: var(--fg-dim);
+  font-size: 12px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.refchip { position: relative; }
+.refchip img {
+  width: 56px;
+  height: 56px;
+  object-fit: cover;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line);
+  display: block;
+}
+.refdel {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  border: none;
+  background: var(--surface-5);
+  color: var(--fg);
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+}
+.refdel:hover { background: var(--err); color: #fff; }
 </style>

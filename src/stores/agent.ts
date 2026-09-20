@@ -223,6 +223,18 @@ export const useAgentStore = defineStore("agent", {
       }
     },
 
+    /** 停止当前回合：pi 引擎能立即中止；自研引擎在下一个步骤边界生效（不打断正在进行的请求） */
+    async stop() {
+      try {
+        if (this.engine === "pi") await invoke("agent_pi_abort");
+        else if (this.activeSessionId) {
+          await invoke("agent_abort", { sessionId: this.activeSessionId });
+        }
+      } catch {
+        /* 忽略 */
+      }
+    },
+
     /** 设置 pi 的思考强度 */
     async setPiThinking(level: string) {
       this.piThinking = level;

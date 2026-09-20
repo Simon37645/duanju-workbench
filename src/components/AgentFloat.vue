@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import {
   AlertTriangle, ArrowUp, BookText, Check, ChevronDown, Gauge, ImagePlus, Images,
-  Loader2, MessageCircleQuestion, Minus, Plus, RefreshCw, Send, Sparkles, Trash2,
+  Loader2, MessageCircleQuestion, Minus, Plus, RefreshCw, Send, Sparkles, Square, Trash2,
   Wrench, X, Zap,
 } from "@lucide/vue";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
@@ -702,7 +702,15 @@ async function removeSession(id: string) {
               </span>
               <span class="t-xs faint">Ctrl+Enter 发送</span>
             </div>
-            <button class="send" :disabled="agent.running || (!input.trim() && !attachments.length)" @click="send">
+            <button
+              v-if="agent.running"
+              class="send stop"
+              title="停止：正在执行的这一步会先收尾，之后不再继续"
+              @click="agent.stop()"
+            >
+              <Square :size="13" />
+            </button>
+            <button v-else class="send" :disabled="!input.trim() && !attachments.length" @click="send">
               <ArrowUp :size="14" />
             </button>
           </div>
@@ -1217,6 +1225,15 @@ async function removeSession(id: string) {
 }
 .send:hover:not(:disabled) {
   background: var(--accent-hover);
+}
+/* 停止按钮：生成中替代发送键 */
+.send.stop {
+  background: var(--err);
+  color: #fff;
+}
+.send.stop:hover:not(:disabled) {
+  background: var(--err);
+  filter: brightness(1.12);
 }
 .send:disabled {
   background: var(--surface-5);

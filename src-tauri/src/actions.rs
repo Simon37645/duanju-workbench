@@ -69,6 +69,30 @@ pub fn compose_image_negative(p: &Project, view: &AssetView) -> String {
     v.join("，")
 }
 
+/// 视频生成的最终提示词：与生图同样的规则，风格圣经拼在最前，保证资产图与视频风格统一。
+pub fn compose_video_prompt(p: &Project, text: &str) -> String {
+    let mut parts: Vec<String> = vec![];
+    if !p.style.spec.prompt.trim().is_empty() {
+        parts.push(p.style.spec.prompt.trim().to_string());
+    }
+    if !text.trim().is_empty() {
+        parts.push(text.trim().to_string());
+    }
+    parts.join("，")
+}
+
+/// 视频生成的负面词：风格 negative + 提示词负面词
+pub fn compose_video_negative(p: &Project, text: &str) -> String {
+    let mut v: Vec<String> = vec![];
+    if !p.style.spec.negative.trim().is_empty() {
+        v.push(p.style.spec.negative.trim().to_string());
+    }
+    if !text.trim().is_empty() {
+        v.push(text.trim().to_string());
+    }
+    v.join("，")
+}
+
 /// 找一张可用的参考图用于保持一致性（优先正面图）。
 fn consistency_ref(asset: &Asset, exclude_view: &str) -> Option<PathBuf> {
     let order = [
@@ -138,7 +162,14 @@ pub fn generate_asset_views(
     for view in targets {
         let prompt = compose_image_prompt(&p, &asset, &view);
         let negative = compose_image_negative(&p, &view);
-        let refs: Vec<PathBuf> = consistency_ref(&asset, &view.id).into_iter().collect();
+        let mut refs: Vec<PathBuf> = consistency_ref(&asset, &view.id).into_iter().collect();
+        // 手动参考图（本地文件 / 已生成资产图）一并作为参考
+        for path_str in &view.ref_images {
+            let path = PathBuf::from(path_str);
+            if path.is_file() && !refs.contains(&path) {
+                refs.push(path);
+            }
+        }
         let dst = dst_for_view(&p, &asset.id, &view.id);
         let job_id = enqueue_image(
             state,
@@ -325,9 +356,16 @@ pub fn generate_video_takes(
                     refs.push(path);
                 }
             }
+            // 手动参考图（本地文件）
+            for path_str in &pr.ref_images {
+                let path = PathBuf::from(path_str);
+                if path.is_file() && !refs.contains(&path) {
+                    refs.push(path);
+                }
+            }
         }
 
-        let text = prompt
+        let raw_text = prompt
             .as_ref()
             .map(|x| x.prompt.clone())
             .filter(|x| !x.trim().is_empty())
@@ -337,7 +375,10 @@ pub fn generate_video_takes(
                     shot.action, shot.shot_size, shot.camera_move
                 )
             });
-        let negative = prompt.as_ref().map(|x| x.negative.clone()).unwrap_or_default();
+        let raw_negative = prompt.as_ref().map(|x| x.negative.clone()).unwrap_or_default();
+        // 风格圣经作为前缀拼进来，与生图规则一致
+        let text = compose_video_prompt(&p, &raw_text);
+        let negative = compose_video_negative(&p, &raw_negative);
         let duration = prompt
             .as_ref()
             .map(|x| x.duration_sec)

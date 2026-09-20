@@ -311,6 +311,12 @@ export async function mockInvoke(cmd: string, args?: Record<string, unknown>): P
       return null;
     case "agent_pi_thinking":
       return null;
+    case "agent_abort":
+      return null;
+    case "asset_prompt_preview":
+      return { prompt: "（浏览器预览）风格词，资产描述，固定特征：…", negative: "（无）" };
+    case "video_prompt_preview":
+      return { prompt: "（浏览器预览）风格词，镜头运动描述", negative: "（无）" };
     case "agent_sessions":
       return [
         {

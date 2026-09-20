@@ -728,6 +728,7 @@ pub async fn run_pipeline_check() -> i32 {
                 views: vec![
                     AssetView {
                         id: vids[0].clone(),
+                        ref_images: vec![],
                         kind: ViewKind::Front,
                         label: "正面".into(),
                         prompt: "正面全身站姿".into(),
@@ -744,6 +745,7 @@ pub async fn run_pipeline_check() -> i32 {
                     },
                     AssetView {
                         id: vids[1].clone(),
+                        ref_images: vec![],
                         kind: ViewKind::Side,
                         label: "侧面".into(),
                         prompt: "侧面全身站姿".into(),
@@ -809,6 +811,7 @@ pub async fn run_pipeline_check() -> i32 {
             for s in shots {
                 p.prompts.push(VideoPrompt {
                     id: new_id("vp"),
+                    ref_images: vec![],
                     shot_id: s.id.clone(),
                     index: s.index,
                     prompt: format!(

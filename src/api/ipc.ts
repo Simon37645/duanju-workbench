@@ -124,8 +124,7 @@ export const api = {
     invoke<void>("storyboard_delete_shot", { shotId }),
 
   /* ------------------------------------------------------------ 资产 */
-  assetUpsert: (asset: Asset) => invoke<Asset>("asset_upsert", { asset }),
-  assetDelete: (assetId: string) => invoke<void>("asset_delete", { assetId }),
+  assetUpsert: (asset: Asset) => invoke<Asset>("asset_upsert", { asset }),  assetDelete: (assetId: string) => invoke<void>("asset_delete", { assetId }),
   assetPlanViews: (assetId: string, views: AssetView[]) =>
     invoke<Asset>("asset_plan_views", { assetId, views }),
   assetGenerateViews: (assetId: string, viewIds: string[], force = false) =>
@@ -166,6 +165,12 @@ export const api = {
 
   /* ------------------------------------------------------- pi 引擎 */
   agentPiThinking: (level: string) => invoke<void>("agent_pi_thinking", { level }),
+
+  /* ------------------------------------------- 生成预览（完整提示词） */
+  assetPromptPreview: (assetId: string, viewId: string) =>
+    invoke<{ prompt: string; negative: string }>("asset_prompt_preview", { assetId, viewId }),
+  videoPromptPreview: (promptId: string) =>
+    invoke<{ prompt: string; negative: string }>("video_prompt_preview", { promptId }),
 
   /* -------------------------------------------------------- checklist */
   checklistGet: () => invoke<Checklist>("checklist_get"),

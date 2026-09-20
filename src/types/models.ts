@@ -212,6 +212,8 @@ export interface AssetView {
   label: string;
   prompt: string;
   negative: string;
+  /** 手动参考图（本地文件或资产图路径） */
+  refImages?: string[];
   file: string | null;
   thumb: string | null;
   seed: number | null;
@@ -253,6 +255,8 @@ export interface VideoPrompt {
   firstFrame: AssetRef | null;
   lastFrame: AssetRef | null;
   refs: AssetRef[];
+  /** 手动参考图（本地文件路径） */
+  refImages?: string[];
   modelHint: string | null;
   seed: number | null;
   status: PromptStatus;
