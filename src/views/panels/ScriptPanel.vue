@@ -58,6 +58,19 @@ watch(
   },
 );
 
+// agent（或其它面板）改了当前章节正文后，列表的字数变了但正文区不会自己刷新。
+// 监听章节的 updatedAt，本地没有未保存修改时重新拉一次正文。
+watch(
+  () => current.value?.updatedAt,
+  async () => {
+    if (!currentId.value || dirty.value) return;
+    const ch = await project.openChapter(currentId.value);
+    content.value = ch.content;
+    title.value = ch.meta.title;
+    summary.value = ch.meta.summary;
+  },
+);
+
 async function select(id: string) {
   if (dirty.value) await save();
   currentId.value = id;

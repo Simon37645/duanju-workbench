@@ -170,6 +170,7 @@ pub fn run() {
             commands::agent_pi_run,
             commands::agent_pi_abort,
             commands::agent_pi_history,
+            commands::agent_pi_thinking,
             commands::agent_prefix_preview,
         ])
         .build(tauri::generate_context!())

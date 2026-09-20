@@ -309,6 +309,8 @@ export async function mockInvoke(cmd: string, args?: Record<string, unknown>): P
       return null;
     case "director_result":
       return null;
+    case "agent_pi_thinking":
+      return null;
     case "agent_sessions":
       return [
         {

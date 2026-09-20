@@ -164,6 +164,9 @@ export const api = {
   subtitleDelete: (subtitleId: string) =>
     invoke<void>("subtitle_delete", { subtitleId }),
 
+  /* ------------------------------------------------------- pi 引擎 */
+  agentPiThinking: (level: string) => invoke<void>("agent_pi_thinking", { level }),
+
   /* -------------------------------------------------------- checklist */
   checklistGet: () => invoke<Checklist>("checklist_get"),
   checklistAdd: (panel: PanelId, text: string) =>

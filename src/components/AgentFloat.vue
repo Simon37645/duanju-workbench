@@ -38,6 +38,34 @@ const scroller = ref<HTMLElement | null>(null);
 const mentionIndex = ref(0);
 const autoScroll = ref(true);
 const showReasoning = ref<Record<string, boolean>>({});
+/** 工具卡片的展开状态（看完整结果） */
+const openTools = ref<Record<string, boolean>>({});
+function toggleTool(id: string) {
+  openTools.value[id] = !openTools.value[id];
+}
+function toolDataText(t: AgentToolCall): string {
+  if (t.data === null || t.data === undefined) return t.summary || "（没有附加数据）";
+  try {
+    return typeof t.data === "string" ? t.data : JSON.stringify(t.data, null, 2);
+  } catch {
+    return String(t.data);
+  }
+}
+
+/* ------------------------------------------------------- pi 思考强度 */
+
+const THINKING_OPTS = [
+  { label: "思考：关", value: "off" },
+  { label: "思考：最低", value: "minimal" },
+  { label: "思考：低", value: "low" },
+  { label: "思考：中", value: "medium" },
+  { label: "思考：高", value: "high" },
+];
+async function setThinking(v: string | null) {
+  if (!v) return;
+  await agent.setPiThinking(v);
+  toast.info(`思考强度已设为「${THINKING_OPTS.find((o) => o.value === v)?.label ?? v}」`);
+}
 
 const session = computed(() => agent.current);
 const messages = computed(() =>
@@ -352,6 +380,14 @@ async function removeSession(id: string) {
         </div>
 
         <div class="row" style="gap: 4px; flex: 0 0 auto">
+          <!-- pi 思考强度 -->
+          <div v-if="agent.engine === 'pi'" style="width: 104px">
+            <UiSelect
+              :model-value="agent.piThinking"
+              :options="THINKING_OPTS"
+              @update:model-value="setThinking"
+            />
+          </div>
           <!-- 上下文水位 -->
           <UiPopover :width="320" placement="bottom-end">
             <template #trigger>
@@ -484,7 +520,13 @@ async function removeSession(id: string) {
             </button>
             <pre v-if="m.reasoning && showReasoning[m.id]" class="reason">{{ m.reasoning }}</pre>
 
-            <div v-for="t in m.toolCalls" :key="t.id" class="tool">
+            <div
+              v-for="t in m.toolCalls"
+              :key="t.id"
+              class="tool clickable"
+              :title="openTools[t.id] ? '点击收起' : '点击展开完整结果'"
+              @click="toggleTool(t.id)"
+            >
               <div class="row" style="gap: 7px; min-width: 0">
                 <div class="ticon" :class="toolTone(t)">
                   <MessageCircleQuestion v-if="t.name === 'ask_user'" :size="11" />
@@ -502,6 +544,9 @@ async function removeSession(id: string) {
               >
                 {{ t.summary }}
               </div>
+              <div v-if="openTools[t.id]" class="tool-full">
+                <pre>{{ toolDataText(t) }}</pre>
+              </div>
             </div>
 
             <div v-if="m.text" class="bubble-bot"><Markdown :text="m.text" /></div>
@@ -512,7 +557,13 @@ async function removeSession(id: string) {
         <div v-if="agent.running || agent.streamText || agent.streamTools.length" class="msg-bot">
           <pre v-if="agent.streamReasoning" class="reason">{{ agent.streamReasoning }}</pre>
 
-          <div v-for="t in agent.streamTools" :key="t.id" class="tool">
+          <div
+            v-for="t in agent.streamTools"
+            :key="t.id"
+            class="tool clickable"
+            :title="openTools[t.id] ? '点击收起' : '点击展开完整结果'"
+            @click="toggleTool(t.id)"
+          >
             <div class="row" style="gap: 7px; min-width: 0">
               <div class="ticon" :class="toolTone(t)">
                 <Loader2 v-if="t.state === 'running'" :size="11" class="spin" />
@@ -528,14 +579,17 @@ async function removeSession(id: string) {
             >
               {{ t.summary }}
             </div>
+            <div v-if="openTools[t.id]" class="tool-full">
+              <pre>{{ toolDataText(t) }}</pre>
+            </div>
 
             <div v-if="t.state === 'awaiting-approval'" class="approve">
               <AlertTriangle :size="13" />
               <span class="t-xs grow">
                 {{ t.costly ? "这个操作会消耗生成额度，确认执行？" : "这一步会修改项目数据，确认执行？" }}
               </span>
-              <UiButton size="xs" variant="primary" @click="approve(t.id, true)">确认</UiButton>
-              <UiButton size="xs" variant="ghost" @click="approve(t.id, false)">拒绝</UiButton>
+              <UiButton size="xs" variant="primary" @click.stop="approve(t.id, true)">确认</UiButton>
+              <UiButton size="xs" variant="ghost" @click.stop="approve(t.id, false)">拒绝</UiButton>
             </div>
           </div>
 
@@ -936,6 +990,27 @@ async function removeSession(id: string) {
 }
 .tsum.bad {
   color: var(--err);
+}
+/* 工具卡片可点击展开完整结果 */
+.tool.clickable {
+  cursor: pointer;
+}
+.tool.clickable:hover {
+  border-color: var(--line-strong);
+}
+.tool-full pre {
+  margin: 4px 0 0;
+  padding: 8px 9px;
+  max-height: 320px;
+  overflow: auto;
+  background: var(--surface-2);
+  border: 1px solid var(--line-faint);
+  border-radius: var(--r-sm);
+  color: var(--fg-dim);
+  font-size: 11px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 .spin {
   animation: spin 900ms linear infinite;

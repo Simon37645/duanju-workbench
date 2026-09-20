@@ -497,6 +497,16 @@ impl PiRuntime {
     }
 }
 
+/// 设置 pi 的思考强度（off/minimal/low/medium/high）。
+/// 进程没起来就先拉起来，保证设置立刻生效。
+pub async fn set_thinking(state: &AppState, level: &str) -> Result<()> {
+    let rt = &state.pi;
+    rt.ensure(state).await?;
+    rt.send(json!({"type": "set_thinking_level", "level": level}))
+        .await?;
+    Ok(())
+}
+
 fn is_alive(child: &mut Child) -> bool {
     matches!(child.try_wait(), Ok(None))
 }
@@ -950,6 +960,8 @@ async fn run_turn_inner(
                         let id = ev.get("toolCallId").and_then(Value::as_str).unwrap_or("").to_string();
                         let name = ev.get("toolName").and_then(Value::as_str).unwrap_or("tool").to_string();
                         let ok = !ev.get("isError").and_then(Value::as_bool).unwrap_or(false);
+                        // 工具结果原文带给前端，卡片可以展开看全（不含图片，本地 IPC 体积可控）
+                        let data = ev.get("result").cloned().unwrap_or(Value::Null);
                         send(
                             &channel,
                             AgentEvent::ToolResult {
@@ -957,7 +969,7 @@ async fn run_turn_inner(
                                 name,
                                 ok,
                                 summary: summarize_tool_result(&ev),
-                                data: Value::Null,
+                                data,
                                 duration_ms: 0,
                             },
                         );

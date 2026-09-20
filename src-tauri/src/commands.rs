@@ -1130,6 +1130,13 @@ pub async fn agent_pi_history(state: State<'_, AppState>) -> Result<Vec<Value>> 
     crate::pi::history(&st).await
 }
 
+/// 设置 pi 的思考强度（off / minimal / low / medium / high）
+#[tauri::command]
+pub async fn agent_pi_thinking(state: State<'_, AppState>, level: String) -> Result<()> {
+    let st = state.inner().clone();
+    crate::pi::set_thinking(&st, &level).await
+}
+
 /// 当前会话的上下文水位
 #[tauri::command]
 pub async fn agent_context(

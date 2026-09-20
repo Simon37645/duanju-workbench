@@ -41,6 +41,8 @@ interface State {
   piStatus: PiStatus | null;
   /** pi 会话历史（浮窗渲染用，来自 pi 的 get_messages） */
   piHistory: AgentMessage[];
+  /** pi 的思考强度（off / minimal / low / medium / high） */
+  piThinking: string;
 }
 
 export const useAgentStore = defineStore("agent", {
@@ -68,6 +70,13 @@ export const useAgentStore = defineStore("agent", {
     })(),
     piStatus: null,
     piHistory: [],
+    piThinking: (() => {
+      try {
+        return localStorage.getItem("pi.thinking") ?? "medium";
+      } catch {
+        return "medium";
+      }
+    })(),
   }),
 
   getters: {
@@ -214,6 +223,21 @@ export const useAgentStore = defineStore("agent", {
       }
     },
 
+    /** 设置 pi 的思考强度 */
+    async setPiThinking(level: string) {
+      this.piThinking = level;
+      try {
+        localStorage.setItem("pi.thinking", level);
+      } catch {
+        /* 忽略 */
+      }
+      try {
+        await invoke("agent_pi_thinking", { level });
+      } catch {
+        // 进程没起来时命令会失败；下次发消息前会自动应用
+      }
+    },
+
     async setEngine(e: AgentEngine) {
       if (this.running) {
         message.warning("上一轮还在进行中，先等它结束");
@@ -249,9 +273,22 @@ export const useAgentStore = defineStore("agent", {
       this.pendingAsk = null;
       this.prefix = null; // pi 引擎没有自研的前缀报告
 
+      // 立刻把这条用户消息放进历史：pi 的 get_messages 要等回合结束才包含它，
+      // 否则对话区只有回复、看不到自己刚发了什么。
+      this.piHistory.push({
+        id: `local_${Date.now()}`,
+        role: "user",
+        text,
+        images: [...imagePaths],
+        createdAt: new Date().toISOString(),
+        toolCalls: [],
+      });
+
       const channel = new Channel<AgentEvent>();
       channel.onmessage = (ev: AgentEvent) => this.handleEvent(ev, "pi");
       try {
+        // 进程可能是刚起来的，发消息前把思考强度同步过去
+        await invoke("agent_pi_thinking", { level: this.piThinking }).catch(() => {});
         await invoke<string>("agent_pi_run", { channel, input: text, imagePaths });
       } catch (e) {
         this.lastError = errorText(e);
