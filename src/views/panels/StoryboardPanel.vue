@@ -20,7 +20,7 @@ import type { Shot, ShotStatus } from "@/types/models";
 const project = useProjectStore();
 const agent = useAgentStore();
 
-const chapterId = ref("");
+const chapterId = ref("all");
 const editing = ref<Shot | null>(null);
 const statusFilter = ref("all");
 const vocab = ref<{ shotSizes: string[]; cameraMoves: string[]; timeOfDay: string[] }>({
@@ -28,12 +28,18 @@ const vocab = ref<{ shotSizes: string[]; cameraMoves: string[]; timeOfDay: strin
 });
 
 const chapters = computed(() => project.chapters);
+/** "all" = 跨章节总览；否则只看某一章 */
 const allShots = computed(() =>
   project.shots
-    .filter((s) => s.chapterId === chapterId.value)
+    .filter((s) => chapterId.value === "all" || s.chapterId === chapterId.value)
     .slice()
     .sort((a, b) => a.index - b.index),
 );
+/** 镜头所属章节的短标签（总览模式下显示） */
+function chapterLabel(id: string): string {
+  const c = chapters.value.find((x) => x.id === id);
+  return c ? `第${c.index}章` : "";
+}
 const shots = computed(() =>
   statusFilter.value === "all" ? allShots.value : allShots.value.filter((s) => s.status === statusFilter.value),
 );
@@ -51,7 +57,6 @@ const statusOptions = (Object.keys(STATUS) as ShotStatus[]).map((k) => ({ label:
 onMounted(async () => {
   vocab.value = await api.storyboardVocab();
   await project.ensure();
-  if (chapters.value.length) chapterId.value = chapters.value[0].id;
   const first = allShots.value[0];
   if (first) edit(first);
 });
@@ -67,6 +72,8 @@ function blank(): Shot {
 }
 
 function edit(s: Shot) {
+  // 总览模式下点某条：自动跟到它所在的章节，方便直接编辑保存
+  if (chapterId.value === "all") chapterId.value = s.chapterId;
   editing.value = JSON.parse(JSON.stringify(s));
 }
 
@@ -119,7 +126,8 @@ async function draftRows() {
 
 function askAgent() {
   const ch = chapters.value.find((c) => c.id === chapterId.value);
-  agent.send("storyboard", `帮我把「${ch?.title}」这一章写完整的分镜，用 storyboard_write_shots 一次写入。`);
+  if (!ch) return toast.warn("先在左上角选一个章节");
+  agent.send("storyboard", `帮我把「${ch.title}」这一章写完整的分镜，用 storyboard_write_shots 一次写入。`);
 }
 </script>
 
@@ -129,9 +137,12 @@ function askAgent() {
       <header class="panel-head">
         <UiSelect
           :model-value="chapterId"
-          :options="chapters.map((c) => ({ label: `第${c.index}章 ${c.title}`, value: c.id }))"
+          :options="[
+            { label: `全部章节（共 ${project.shots.length} 个镜头）`, value: 'all' },
+            ...chapters.map((c) => ({ label: `第${c.index}章 ${c.title}`, value: c.id })),
+          ]"
           style="flex: 1; min-width: 0"
-          @update:model-value="(v: string | null) => { chapterId = v ?? ''; editing = null; }"
+          @update:model-value="(v: string | null) => { chapterId = v ?? 'all'; editing = null; }"
         />
         <div class="row" style="gap: 4px; flex: 0 0 auto">
           <UiBadge tone="neutral" size="xs"><Film :size="9" /> {{ allShots.length }}</UiBadge>
@@ -150,8 +161,22 @@ function askAgent() {
           ]"
         />
         <span class="grow" />
-        <UiButton variant="subtle" size="xs" @click="draftRows">生成空行</UiButton>
-        <UiButton variant="default" size="xs" @click="editing = blank()">
+        <UiButton
+          variant="subtle"
+          size="xs"
+          :disabled="chapterId === 'all'"
+          :title="chapterId === 'all' ? '总览模式下先在左上角选一个章节' : ''"
+          @click="draftRows"
+        >
+          生成空行
+        </UiButton>
+        <UiButton
+          variant="default"
+          size="xs"
+          :disabled="chapterId === 'all'"
+          :title="chapterId === 'all' ? '总览模式下先在左上角选一个章节再新增' : ''"
+          @click="editing = blank()"
+        >
           <template #icon><Plus :size="12" /></template>
           新增
         </UiButton>
@@ -168,6 +193,7 @@ function askAgent() {
           <div class="sidx num">{{ s.index }}</div>
           <div class="col grow" style="gap: 3px; min-width: 0">
             <div class="row wrap" style="gap: 4px">
+              <UiBadge v-if="chapterId === 'all'" tone="info" size="xs">{{ chapterLabel(s.chapterId) }}</UiBadge>
               <UiBadge tone="accent" size="xs">{{ s.shotSize }}</UiBadge>
               <UiBadge tone="neutral" size="xs">{{ s.cameraMove }}</UiBadge>
               <UiBadge tone="neutral" size="xs">{{ s.durationSec }}s</UiBadge>
@@ -189,11 +215,11 @@ function askAgent() {
 
         <UiEmpty
           v-if="!shots.length"
-          title="这一章还没有分镜"
+          :title="chapterId === 'all' ? '还没有任何镜头' : '这一章还没有分镜'"
           hint="按大纲生成空行逐条填，或者直接让 agent 写完整章镜头表"
         >
           <template #icon><Film :size="26" /></template>
-          <UiButton variant="outline" size="sm" @click="askAgent">
+          <UiButton variant="outline" size="sm" :disabled="chapterId === 'all'" @click="askAgent">
             <template #icon><Wand2 :size="13" /></template>
             让 agent 写这一章
           </UiButton>
