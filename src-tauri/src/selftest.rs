@@ -242,7 +242,7 @@ pub async fn run_import_skills(paths: &[String]) -> i32 {
     println!("
 === 导入技能 ===
 ");
-    match crate::skills::import(&state, paths) {
+    match crate::skills::import(&state, paths, "user").await {
         Ok(added) => {
             for a in &added {
                 println!("  + {a}");

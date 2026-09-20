@@ -59,22 +59,68 @@ pub struct Skill {
     pub files: Vec<String>,
     pub chars: usize,
     pub enabled: bool,
+    /// 存储位置：user = 全局（配置目录，所有项目共用）；project = 当前项目目录（跟着项目走）
+    pub location: String,
 }
 
 pub fn skills_dir(state: &AppState) -> PathBuf {
     state.config.dir().join("skills")
 }
 
-fn flags_file(state: &AppState) -> PathBuf {
-    skills_dir(state).join("_flags.json")
+/// 项目级技能目录（跟着项目走，换台机器也在）
+pub fn project_skills_dir(state: &AppState) -> Option<PathBuf> {
+    state
+        .project
+        .read()
+        .as_ref()
+        .map(|p| p.root().join("skills"))
 }
 
-fn load_flags(state: &AppState) -> std::collections::BTreeMap<String, bool> {
-    store::read_json_or_default(&flags_file(state)).unwrap_or_default()
+/// 技能搜索顺序：**项目优先**（同名时项目里的覆盖全局的）
+pub fn skill_dirs(state: &AppState) -> Vec<(PathBuf, &'static str)> {
+    let mut v: Vec<(PathBuf, &'static str)> = vec![];
+    if let Some(p) = project_skills_dir(state) {
+        v.push((p, "project"));
+    }
+    v.push((skills_dir(state), "user"));
+    v
 }
 
-fn save_flags(state: &AppState, flags: &std::collections::BTreeMap<String, bool>) -> Result<()> {
-    store::write_json(&flags_file(state), flags)
+/// 按 id 定位技能：返回（所在目录, user|project）
+pub fn find_skill(state: &AppState, id: &str) -> Option<(PathBuf, &'static str)> {
+    for (dir, loc) in skill_dirs(state) {
+        if dir.join(id).is_dir() && dir.join(id).join(SKILL_FILE).is_file() {
+            return Some((dir, loc));
+        }
+        for ext in ["md", "markdown", "txt"] {
+            if dir.join(format!("{id}.{ext}")).is_file() {
+                return Some((dir, loc));
+            }
+        }
+    }
+    None
+}
+
+/// 指定存储位置的技能目录（project 需要先打开项目）
+pub fn skills_dir_for(state: &AppState, location: &str) -> Result<PathBuf> {
+    if location == "project" {
+        project_skills_dir(state)
+            .ok_or_else(|| AppError::Config("要先打开项目才能用项目级技能".into()))
+    } else {
+        Ok(skills_dir(state))
+    }
+}
+
+fn flags_file_at(dir: &Path) -> PathBuf {
+    dir.join("_flags.json")
+}
+
+fn load_flags_at(dir: &Path) -> std::collections::BTreeMap<String, bool> {
+    store::read_json_or_default(&flags_file_at(dir)).unwrap_or_default()
+}
+
+fn save_flags_at(dir: &Path, flags: &std::collections::BTreeMap<String, bool>) -> Result<()> {
+    store::write_json(&flags_file_at(dir), flags)
 }
 
 /* ---------------------------------------------------------- frontmatter */
@@ -145,79 +191,89 @@ fn collect_files(dir: &Path, base: &Path, out: &mut Vec<String>) {
 }
 
 pub fn list(state: &AppState) -> Vec<Skill> {
-    let dir = skills_dir(state);
-    let flags = load_flags(state);
     let mut out: Vec<Skill> = vec![];
-    let Ok(rd) = std::fs::read_dir(&dir) else {
-        return out;
-    };
-
-    for entry in rd.flatten() {
-        let path = entry.path();
-        let id = entry.file_name().to_string_lossy().to_string();
-        if id.starts_with('.') || id.starts_with('_') {
+    // 项目优先：同名技能项目里的覆盖全局的
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for (dir, location) in skill_dirs(state) {
+        let flags = load_flags_at(&dir);
+        let Ok(rd) = std::fs::read_dir(&dir) else {
             continue;
-        }
+        };
+        for entry in rd.flatten() {
+            let path = entry.path();
+            let file_name = entry.file_name().to_string_lossy().to_string();
+            if file_name.starts_with('.') || file_name.starts_with('_') {
+                continue;
+            }
 
-        if path.is_dir() {
-            let entry_file = path.join(SKILL_FILE);
-            if !entry_file.is_file() {
-                continue; // 不是技能目录
+            if path.is_dir() {
+                let entry_file = path.join(SKILL_FILE);
+                if !entry_file.is_file() {
+                    continue; // 不是技能目录
+                }
+                let Ok(text) = std::fs::read_to_string(&entry_file) else { continue };
+                let (meta, body) = parse_front(&text);
+                let mut files = vec![];
+                collect_files(&path, &path, &mut files);
+                files.retain(|f| f != SKILL_FILE);
+                files.sort();
+                if !seen.insert(file_name.clone()) {
+                    continue;
+                }
+                out.push(Skill {
+                    name: if meta.name.is_empty() { file_name.clone() } else { meta.name },
+                    description: if meta.description.is_empty() {
+                        fallback_description(&body)
+                    } else {
+                        meta.description
+                    },
+                    kind: if meta.kind.is_empty() { "skill".into() } else { meta.kind },
+                    enabled: *flags.get(&file_name).unwrap_or(&true),
+                    dir: Some(path.to_string_lossy().to_string()),
+                    entry: entry_file.to_string_lossy().to_string(),
+                    files,
+                    chars: body.chars().count(),
+                    id: file_name,
+                    location: location.to_string(),
+                });
+            } else {
+                let ext = path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .unwrap_or("")
+                    .to_ascii_lowercase();
+                if ext != "md" && ext != "markdown" && ext != "txt" {
+                    continue;
+                }
+                let stem = path
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                if stem.is_empty() {
+                    continue;
+                }
+                let Ok(text) = std::fs::read_to_string(&path) else { continue };
+                let (meta, body) = parse_front(&text);
+                if !seen.insert(stem.clone()) {
+                    continue;
+                }
+                out.push(Skill {
+                    name: if meta.name.is_empty() { stem.clone() } else { meta.name },
+                    description: if meta.description.is_empty() {
+                        fallback_description(&body)
+                    } else {
+                        meta.description
+                    },
+                    kind: if meta.kind.is_empty() { "skill".into() } else { meta.kind },
+                    enabled: *flags.get(&stem).unwrap_or(&true),
+                    dir: None,
+                    entry: path.to_string_lossy().to_string(),
+                    files: vec![],
+                    chars: body.chars().count(),
+                    id: stem,
+                    location: location.to_string(),
+                });
             }
-            let Ok(text) = std::fs::read_to_string(&entry_file) else { continue };
-            let (meta, body) = parse_front(&text);
-            let mut files = vec![];
-            collect_files(&path, &path, &mut files);
-            files.retain(|f| f != SKILL_FILE);
-            files.sort();
-            out.push(Skill {
-                name: if meta.name.is_empty() { id.clone() } else { meta.name },
-                description: if meta.description.is_empty() {
-                    fallback_description(&body)
-                } else {
-                    meta.description
-                },
-                kind: if meta.kind.is_empty() { "skill".into() } else { meta.kind },
-                enabled: *flags.get(&id).unwrap_or(&true),
-                dir: Some(path.to_string_lossy().to_string()),
-                entry: entry_file.to_string_lossy().to_string(),
-                files,
-                chars: body.chars().count(),
-                id,
-            });
-        } else {
-            let ext = path
-                .extension()
-                .and_then(|e| e.to_str())
-                .unwrap_or("")
-                .to_ascii_lowercase();
-            if ext != "md" && ext != "markdown" && ext != "txt" {
-                continue;
-            }
-            let stem = path
-                .file_stem()
-                .map(|s| s.to_string_lossy().to_string())
-                .unwrap_or_default();
-            if stem.is_empty() {
-                continue;
-            }
-            let Ok(text) = std::fs::read_to_string(&path) else { continue };
-            let (meta, body) = parse_front(&text);
-            out.push(Skill {
-                name: if meta.name.is_empty() { stem.clone() } else { meta.name },
-                description: if meta.description.is_empty() {
-                    fallback_description(&body)
-                } else {
-                    meta.description
-                },
-                kind: if meta.kind.is_empty() { "skill".into() } else { meta.kind },
-                enabled: *flags.get(&stem).unwrap_or(&true),
-                dir: None,
-                entry: path.to_string_lossy().to_string(),
-                files: vec![],
-                chars: body.chars().count(),
-                id: stem,
-            });
         }
     }
 
@@ -263,13 +319,19 @@ pub fn read_file(state: &AppState, id: &str, rel: &str) -> Result<String> {
 /* ---------------------------------------------------------------- 管理 */
 
 pub fn set_enabled(state: &AppState, id: &str, enabled: bool) -> Result<()> {
-    let mut flags = load_flags(state);
+    // 开关写在技能实际所在的位置（项目 / 全局）；找不到时退化到全局
+    let dir = find_skill(state, id)
+        .map(|(d, _)| d)
+        .unwrap_or_else(|| skills_dir(state));
+    let mut flags = load_flags_at(&dir);
     flags.insert(id.to_string(), enabled);
-    save_flags(state, &flags)
+    save_flags_at(&dir, &flags)
 }
 
 pub fn delete(state: &AppState, id: &str) -> Result<()> {
-    let dir = skills_dir(state);
+    let Some((dir, _)) = find_skill(state, id) else {
+        return Err(AppError::NotFound(format!("技能不存在：{id}")));
+    };
     let folder = dir.join(id);
     if folder.is_dir() {
         std::fs::remove_dir_all(&folder)?;
@@ -281,22 +343,87 @@ pub fn delete(state: &AppState, id: &str) -> Result<()> {
             }
         }
     }
-    let mut flags = load_flags(state);
+    let mut flags = load_flags_at(&dir);
     flags.remove(id);
-    save_flags(state, &flags)
+    save_flags_at(&dir, &flags)
 }
 
-/// 导入技能。支持四种入参：
-/// - 带 `SKILL.md` 的目录 → 整个目录拷进来
-/// - 单个 `.md` → 作为单文件技能
-/// - 其它目录 → 当作「技能合集」批量扫描
-/// - `.zip` → 解压后扫描里面的所有技能（合集包通常就是这个形态）
-pub fn import(state: &AppState, paths: &[String]) -> Result<Vec<String>> {
-    let dir = skills_dir(state);
+/// GitHub 仓库页 → 自动转成 zip 下载地址；其它 URL 原样返回。
+fn normalize_url(url: &str) -> String {
+    let u = url.trim();
+    if let Some(rest) = u.strip_prefix("https://github.com/") {
+        let clean = rest.trim_end_matches('/');
+        if !clean.contains("/archive/") && !clean.to_ascii_lowercase().ends_with(".zip") {
+            let parts: Vec<&str> = clean.split('/').collect();
+            if parts.len() == 2 && !parts[0].is_empty() && !parts[1].is_empty() {
+                return format!(
+                    "https://github.com/{}/{}/archive/refs/heads/main.zip",
+                    parts[0], parts[1]
+                );
+            }
+        }
+    }
+    u.to_string()
+}
+
+/// 下载 URL 到临时文件（按扩展名判断 zip / md），返回本地路径。
+async fn fetch_source(state: &AppState, url: &str) -> Result<PathBuf> {
+    let target = normalize_url(url);
+    let http = state.http_client()?;
+    let resp = http
+        .get(&target)
+        .send()
+        .await
+        .map_err(|e| AppError::Provider(format!("下载失败：{e}")))?;
+    if !resp.status().is_success() {
+        return Err(AppError::Provider(format!(
+            "下载失败：HTTP {}（地址 {target}）",
+            resp.status().as_u16()
+        )));
+    }
+    let bytes = resp
+        .bytes()
+        .await
+        .map_err(|e| AppError::Provider(format!("读取下载内容失败：{e}")))?;
+    let name = target
+        .split('?')
+        .next()
+        .unwrap_or(&target)
+        .split('/')
+        .last()
+        .unwrap_or("skill");
+    let ext = if name.to_ascii_lowercase().ends_with(".zip") {
+        "zip"
+    } else {
+        "md"
+    };
+    let dir = state.config.dir().join("tmp");
+    store::ensure_dir(&dir)?;
+    let path = dir.join(format!("skill-import-{}.{ext}", uuid::Uuid::new_v4().simple()));
+    std::fs::write(&path, &bytes)?;
+    Ok(path)
+}
+
+/// 导入技能。支持：
+/// - URL（http/https）：zip 包直链、单个 .md、或 GitHub 仓库页（自动转 zip）
+/// - 带 `SKILL.md` 的本地目录 / 单个 `.md` / 技能合集目录 / `.zip` 压缩包
+///
+/// `location`：user = 全局（默认），project = 当前项目目录。
+pub async fn import(state: &AppState, paths: &[String], location: &str) -> Result<Vec<String>> {
+    let dir = skills_dir_for(state, location)?;
     store::ensure_dir(&dir)?;
     let mut added = vec![];
     for raw in paths {
-        let src = Path::new(raw);
+        // URL 先下载到临时文件，再按本地路径处理
+        let downloaded: Option<PathBuf> = if raw.starts_with("http://") || raw.starts_with("https://")
+        {
+            Some(fetch_source(state, raw).await?)
+        } else {
+            None
+        };
+        let src: &Path = downloaded
+            .as_deref()
+            .unwrap_or_else(|| Path::new(raw));
         if src.is_file() && src.extension().and_then(|e| e.to_str()).map(|e| e.eq_ignore_ascii_case("zip")).unwrap_or(false) {
             added.extend(import_zip(&dir, src)?);
             continue;

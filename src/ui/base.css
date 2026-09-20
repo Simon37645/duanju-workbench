@@ -241,7 +241,6 @@ a:hover {
 }
 .md strong {
   font-weight: 600;
-  color: #fff;
 }
 .md code {
   background: var(--code-bg);

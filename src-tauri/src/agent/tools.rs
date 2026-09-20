@@ -1835,6 +1835,31 @@ fn parse_panel(s: &str) -> Result<PanelId> {
     }
 }
 
+/* ============================ 技能安装 ============================ */
+
+/// 装技能：URL（GitHub 仓库 / zip / md）或本机路径，装完立即生效
+async fn t_skill_add(ctx: ToolCtx, args: Value) -> Result<ToolOutcome> {
+    let sources = arg_str_list(&args, "sources");
+    if sources.is_empty() {
+        return Err(AppError::invalid(
+            "请给出技能来源：GitHub 仓库链接、zip 直链，或本机路径",
+        ));
+    }
+    let location = arg_opt_str(&args, "location").unwrap_or_else(|| "user".into());
+    let added = crate::skills::import(&ctx.state, &sources, &location).await?;
+    // 热生效：前缀一重置，下一条消息就能用上新技能
+    ctx.state.reset_agent_prefix();
+    Ok(ToolOutcome::new(
+        format!(
+            "已导入 {} 个技能（{}）：{}。已立即生效（下一条消息可用）。",
+            added.len(),
+            if location == "project" { "项目级" } else { "全局" },
+            added.join("、")
+        ),
+        json!({"added": added, "location": location}),
+    ))
+}
+
 /* ============================ 3D 预演（导演台） ============================ */
 
 /// 读导演台工程现状（走它的 director_read —— 为 agent 设计的友好读取）
@@ -1914,6 +1939,14 @@ pub fn registry(_panel: PanelId) -> Vec<Tool> {
             schema::skill_read_file(),
             false,
             t_skill_read_file
+        ),
+        tool!(
+            "skill_add",
+            "添加技能",
+            "把用户提供的技能装进来：支持 GitHub 仓库链接 / zip 直链 / 单文件 md 的 URL，或本机路径（zip、带 SKILL.md 的目录、单个 md）。装好后**立即生效**（自动刷新提示词前缀，不用重启），下一条消息就能用；装完可以用 skill_list 核对。用户说「帮我添加 XX skill」时用这个。location：user = 全局（默认，所有项目可用），project = 只属于当前项目。",
+            schema::skill_add(),
+            false,
+            t_skill_add
         ),
         tool!(
             "ask_user",

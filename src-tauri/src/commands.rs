@@ -697,8 +697,14 @@ pub async fn skill_read_file(
 }
 
 #[tauri::command]
-pub async fn skill_import(state: State<'_, AppState>, paths: Vec<String>) -> Result<Vec<String>> {
-    let added = crate::skills::import(&state, &paths)?;
+pub async fn skill_import(
+    state: State<'_, AppState>,
+    paths: Vec<String>,
+    location: Option<String>,
+) -> Result<Vec<String>> {
+    let added =
+        crate::skills::import(&state, &paths, location.as_deref().unwrap_or("user")).await?;
+    // 热生效：前缀一重置，下一条消息就能用上新技能（不用重启）
     state.reset_agent_prefix();
     Ok(added)
 }

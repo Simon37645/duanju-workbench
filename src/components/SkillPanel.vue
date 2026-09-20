@@ -69,11 +69,16 @@ async function importDir() {
   await doImport(list);
 }
 
+/** 导入到哪：全局（所有项目共用）或项目（跟着当前项目走） */
+const importLocation = ref<"user" | "project">("user");
+
 async function doImport(paths: string[]) {
   try {
-    const added = await api.skillImport(paths);
+    const added = await api.skillImport(paths, importLocation.value);
     await load();
-    toast.ok(`已导入 ${added.length} 个技能`);
+    toast.ok(
+      `已导入 ${added.length} 个技能（${importLocation.value === "project" ? "项目级" : "全局"}），立即生效`,
+    );
   } catch (e) {
     toast.err(errorText(e));
   }
@@ -172,6 +177,20 @@ async function previewFile(s: Skill, path: string) {
         所以装几十个技能，前缀里也只有几十行目录，正文永远不会为无关话题付费。
         <b>description 要写「什么时候用」，别写「这是什么」</b> —— 模型只靠它做判断。
       </p>
+      <div class="row" style="gap: 8px; margin-top: 10px; align-items: center">
+        <span class="t-xs faint">装到</span>
+        <div style="width: 200px">
+          <UiSelect
+            :model-value="importLocation"
+            :options="[
+              { label: '全局（所有项目可用）', value: 'user' },
+              { label: '本项目（跟着项目走）', value: 'project' },
+            ]"
+            @update:model-value="(v: string | null) => (importLocation = v === 'project' ? 'project' : 'user')"
+          />
+        </div>
+        <span v-if="importLocation === 'project'" class="t-xs faint">项目级技能会存进当前项目目录</span>
+      </div>
       <div class="row wrap" style="gap: 6px; margin-top: 10px">
         <UiButton variant="outline" size="sm" @click="importFiles">
           <template #icon><Import :size="13" /></template>
@@ -211,6 +230,9 @@ async function previewFile(s: Skill, path: string) {
           <div class="col grow" style="gap: 2px; min-width: 0">
             <div class="row wrap" style="gap: 6px">
               <span class="t-sm" style="font-weight: 500">{{ s.name }}</span>
+              <UiBadge :tone="s.location === 'project' ? 'accent' : 'neutral'" size="xs">
+                {{ s.location === "project" ? "项目" : "全局" }}
+              </UiBadge>
               <UiBadge v-if="s.dir" tone="info" size="xs">
                 <Paperclip :size="9" /> {{ s.files.length }} 个附件
               </UiBadge>

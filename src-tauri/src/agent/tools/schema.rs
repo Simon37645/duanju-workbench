@@ -26,9 +26,28 @@ pub fn empty() -> Value {
     json!({ "type": "object", "properties": {}, "required": [] })
 }
 
-/// 导演台通用工具调用：name + args 透传给它的工具服务
-pub fn director_tool() -> Value {
+/// 安装技能：来源清单 + 存到哪
+pub fn skill_add() -> Value {
     json!({
+        "type": "object",
+        "properties": {
+            "sources": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "技能来源：GitHub 仓库链接、zip/md 直链，或本机路径（zip / 带 SKILL.md 的目录 / 单个 md），可以给多个"
+            },
+            "location": {
+                "type": "string",
+                "enum": ["user", "project"],
+                "description": "装到哪：user = 全局（默认，所有项目可用）；project = 只属于当前项目"
+            }
+        },
+        "required": ["sources"]
+    })
+}
+
+/// 导演台通用工具调用：name + args 透传给它的工具服务
+pub fn director_tool() -> Value {    json!({
         "type": "object",
         "properties": {
             "name": {

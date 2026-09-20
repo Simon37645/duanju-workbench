@@ -527,4 +527,6 @@ export interface Skill {
   files: string[];
   chars: number;
   enabled: boolean;
+  /** 存储位置：user = 全局（所有项目可用）；project = 只属于当前项目 */
+  location: string;
 }

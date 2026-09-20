@@ -215,7 +215,7 @@ export const api = {
   skillList: () => invoke<import("@/types/models").Skill[]>("skill_list"),
   skillRead: (id: string) => invoke<string>("skill_read", { id }),
   skillReadFile: (id: string, path: string) => invoke<string>("skill_read_file", { id, path }),
-  skillImport: (paths: string[]) => invoke<string[]>("skill_import", { paths }),
+  skillImport: (paths: string[], location?: string) => invoke<string[]>("skill_import", { paths, location }),
   skillDelete: (id: string) => invoke<void>("skill_delete", { id }),
   skillSetEnabled: (id: string, enabled: boolean) =>
     invoke<void>("skill_set_enabled", { id, enabled }),

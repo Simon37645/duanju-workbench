@@ -295,6 +295,9 @@ onMounted(async () => {
   await agent.loadSessions();
   await agent.refreshContext();
   void agent.refreshPiStatus();
+  // pi 模式下把历史拉回来：应用重开时引擎是从本地记忆恢复的，
+  // 不会经过 setEngine，别再漏掉这一次加载
+  if (agent.engine === "pi") void agent.loadPiHistory();
   try {
     skills.value = (await api.skillList()).filter((s) => s.enabled);
   } catch {
