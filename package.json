@@ -3,7 +3,16 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "短剧全流程制作工作台 (Tauri + Vue)",
+  "description": "Short-drama production workbench — script to finished cut (Tauri + Vue)",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Simon37645/duanju-workbench.git"
+  },
+  "homepage": "https://github.com/Simon37645/duanju-workbench#readme",
+  "bugs": {
+    "url": "https://github.com/Simon37645/duanju-workbench/issues"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",

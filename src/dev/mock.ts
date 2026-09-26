@@ -77,7 +77,7 @@ const view = (id: string, kind: string, label: string, done: boolean, prompt: st
   thumb: done ? `C:/demo/assets/${id}.png` : null,
   seed: null,
   model: done ? "gpt-image-1" : null,
-  providerId: done ? "simon" : null,
+  providerId: done ? "img-1" : null,
   status: (done ? "done" : "planned") as never,
   error: null,
   jobId: null,
@@ -250,7 +250,7 @@ const settings: AppSettings = {
     { path: "E:/projects/示例短剧", name: "示例短剧", id: "prj_demo", openedAt: now, exists: true },
   ],
   providers: [
-    { id: "llm-1", kind: "llm", name: "主力文本模型", adapter: "openai", baseUrl: "https://api.example.com", apiKeyRef: "key_image_api", model: "gpt-4o-mini", concurrency: 4, timeoutSec: 900, enabled: true, options: { maxTokens: 8000, temperature: 0.7 } },
+    { id: "llm-1", kind: "llm", name: "主力文本模型", adapter: "openai", baseUrl: "https://api.example.com/v1", apiKeyRef: "key_text_api", model: "gpt-4o-mini", concurrency: 4, timeoutSec: 900, enabled: true, options: { maxTokens: 8000, temperature: 0.7 } },
     { id: "img-1", kind: "image", name: "图片生成", adapter: "generic-http", baseUrl: "https://api.example.com", apiKeyRef: "key_image_api", model: "gpt-image-1", concurrency: 2, timeoutSec: 600, enabled: true, options: { size: "1024x1536" } },
     { id: "vid-1", kind: "video", name: "首尾帧生视频", adapter: "generic-http", baseUrl: "https://comfy.example.com", apiKeyRef: "key_video_api", model: "my_first_last_frame_workflow", concurrency: 2, timeoutSec: 1800, enabled: true, options: { authStyle: "raw" } },
   ],
@@ -260,7 +260,7 @@ const settings: AppSettings = {
 
 const asrCaps: AsrCapabilities = {
   os: "windows", arch: "x86_64", cpuThreads: 24, appleSilicon: false,
-  cudaAvailable: true, cudaVersion: "12.4", nvidiaGpu: "NVIDIA GeForce RTX 4060 Laptop GPU",
+  cudaAvailable: true, cudaVersion: "12.4", nvidiaGpu: "NVIDIA GeForce RTX 4060",
   metalSupported: false, vulkanSupported: true, directmlSupported: true,
   whisperCompiled: false, compiledBackends: [], externalCliAvailable: false, externalCliPath: null,
   recommendedBackend: "cuda", modelsDir: "C:/Users/demo/AppData/Roaming/com.duanju.workbench/models/whisper",
@@ -288,7 +288,7 @@ export async function mockInvoke(cmd: string, args?: Record<string, unknown>): P
     case "settings_get":
       return settings;
     case "secrets_status":
-      return { key_image_api: true, key_video_api: true };
+      return { key_text_api: true, key_image_api: true, key_video_api: true };
     case "jobs_list":
       return jobs;
     case "checklist_get":
@@ -325,7 +325,7 @@ export async function mockInvoke(cmd: string, args?: Record<string, unknown>): P
           panel: "storyboard",
           title: "把第一章拆成分镜",
           messages: [],
-          lastProviderId: "simon-llm",
+          lastProviderId: "llm-1",
           lastModel: "gpt-4o-mini",
           turns: 3,
           totalUsage: { inputTokens: 4821, outputTokens: 1340, cacheReadTokens: 41200, cacheWriteTokens: 6200 },

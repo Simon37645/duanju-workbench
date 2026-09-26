@@ -28,3 +28,13 @@ app/
 # 本地样例项目与临时产物
 _samples/
 *.tmp
+
+# 日志与本地环境
+*.log
+.env
+.env.local
+
+# 编辑器 / 系统
+.idea/
+.vscode/
+Thumbs.db

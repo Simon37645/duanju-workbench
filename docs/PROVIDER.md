@@ -181,15 +181,20 @@
 
 ---
 
-# 现成配置：示例 API（生图）+ 第三方平台 ComfyUI（生视频）
+# 两份实战配置范例
 
-这两家的字段是从各自文档页上抄下来的，设置面板里点「快速预设」即可填好，
-只要再补 API Key / Token。以下也给出等价的 JSON，方便手工改。
+下面两份配置是「把接口文档翻译成 `options`」的范例，对应两类很常见的服务形态：
 
-## 示例 API —— GPT 系列生图
+1. **OpenAI 兼容的生图网关**（New API / one-api 这类自建网关都算）；
+2. **ComfyUI 工作流平台**（提交任务 → 轮询 → 取结果，图片要先上传换成 URL）。
 
-**它本质是一个 New API 网关**（导航里的「文档」指向 `docs.newapi.pro`），
-所以走标准 OpenAI 图片协议。
+> 域名、模型名、工作流 id 一律是**占位值**，照着自己的接口文档改。
+> 设置面板里的「快速预设」填的就是这两份骨架。
+
+## 范例一：OpenAI 兼容生图网关
+
+自建网关（[New API](https://github.com/Calcium-Ion/new-api)、one-api 等）对外就是标准
+OpenAI 图片协议，所以配置很短。
 
 | 项 | 值 |
 | --- | --- |
@@ -197,14 +202,6 @@
 | 提交 | `POST /v1/images/generations` |
 | 认证 | `Authorization: Bearer <token>`（即 `authStyle: bearer`，默认） |
 | 返回 | `{ created, data: [{ url, b64_json }], usage }` |
-
-站上可用的图片模型（模型广场实际列表）：
-
-```
-gpt-image-1   gpt-image-1-flare   gpt-image-1-sunburst
-gpt-image-2     gpt-image-2-1k
-gemini-3-pro-image-preview   gemini-3.1-flash-image   gemini-3.1-flash-image-preview
-```
 
 **注意尺寸**：gpt-image 系列只认 `1024x1024` / `1536x1024`(横) / `1024x1536`(竖) / `auto`。
 短剧竖屏就固定用 `1024x1536`（在 `options.size` 里写死，覆盖按画幅算出来的值）。
@@ -234,27 +231,27 @@ provider 里填：适配器 `generic-http`、模型名 `gpt-image-1`、Base URL 
 
 > 结果拿 `n=1`，一次一张。批量出图由工作台的任务队列并发控制（`concurrency`）。
 
-## 第三方平台 ComfyUI —— 视频工作流
+## 范例二：ComfyUI 工作流平台
 
 ### 基础协议
 
 | 项 | 值 |
 | --- | --- |
 | Base URL | `https://comfy.example.com` |
-| 提交 | `POST /api/v1/comfyui/comfyui_workflow/{workflow_id}` |
-| 查询 | `GET /api/v1/comfyui/comfyui_workflow/result/{task_id}` |
+| 提交 | `POST /api/v1/workflow/{workflow_id}` |
+| 查询 | `GET /api/v1/workflow/result/{task_id}` |
 | 认证 | **裸 Token**：`Authorization: <token>`（**不带** `Bearer `）→ `authStyle: "raw"` |
 | 状态 | `QUEUED` → `RUNNING` → `SUCCESS`（失败为 `FAILED`），无百分比进度 |
 | 结果 | `data.results[].url`（`type: video`、`file_type: mp4`），**URL 有效期很短，要立刻下载** |
 
-自查一下：工作流详情页的「API」标签页给出该工作流的确切入参；
-元数据接口 `GET /api/v1/comfyui/workflows/{uuid}` 里的 `input_rules` 是机器可读版本
-（含类型、必填、范围、`resolution` 枚举）。
+自查一下：平台里每个工作流的详情页一般会给出该工作流的确切入参；
+有些还提供元数据接口（`GET /api/v1/workflow/{uuid}`），其中的 `input_rules`
+是机器可读版本（含类型、必填、范围、枚举值）。
 
 ### 关键约束：图片必须是 URL，不能是 base64
 
-`first_frame` / `ref_image_0` 这些字段文档写的是「图片 URL」。
-但 第三方平台 有自己的一套上传接口，工作台已经把它实现成通用的 `upload` 配置：
+`first_frame` / `ref_image_0` 这些字段收的是「图片 URL」。这类平台通常自带一套上传接口，
+工作台已经把它实现成通用的 `upload` 配置：
 
 ```
 POST /api/v1/file/before_upload   {md5, file_size}
@@ -266,29 +263,24 @@ PUT  {host}/api/v1/file           分片 multipart：FileToken/md5/chunk/chunks/
 `quickly_upload: true` 表示服务端已有同 md5 的文件（秒传）。
 传完之后用文件 md5 作为引用值 —— 这一条就是 `refTemplate: "{{md5}}"`。
 
-### 工作流清单（17 个）
+### 工作流入参长什么样
 
-| workflow_id | 用途 | 必填入参 |
+工作流 id 由平台自己定义。举几个典型形态，看规律即可：
+
+| workflow_id（示例） | 用途 | 必填入参 |
 | --- | --- | --- |
 | `my_first_last_frame_workflow` | **首尾帧生视频** | `first_frame` `last_frame` `prompt`，`duration` 1~15，`resolution` |
 | `my_multi_ref_workflow` | **多图参考生视频**（最多 9 张） | `ref_image_0` `prompt`，`duration` 1~10 |
-| `my_multi_ref_workflow_15s` | 多图参考 15 秒 | 同上，`duration` 1~15 |
-| `my_first_last_frame_workflow_no_pic` | 文生视频 | `prompt`，`duration` 1~15 |
-| `example_workflow` | 首尾帧（另一实现） | `first_frame` `last_frame` `prompt` |
-| `example_workflow` | 多图生视频 12 秒 | `ref_image_0` `prompt`，`duration` 1~12 |
-| `example_workflow` | **图 + 音频 → 视频（自动对口型）** | `ref_image_0` `ref_audio_0` |
-| `example_workflow` | 多图多音频 | `prompt`，`ref_image_*` `ref_audio_0..2` |
-| `example_workflow` / `example_variant` | 多图多音频（升级画质 / 高速） | `ref_image_0` `prompt` |
-| `example_workflow` / `example_variant` / `example_variant` | 文生 / 六图 / 六图三音频 | 见上表规律 |
-| `example_tts_workflow` | 语音合成（配音用） | `prompt_text`，`prompt_simple`(参考音) |
-| `example_motion_workflow` | 动作迁移 | `ref_image` `ref_video` |
+| `my_text_to_video_workflow` | 文生视频 | `prompt`，`duration` 1~15 |
+| `my_image_audio_to_video_workflow` | 图 + 音频 → 视频（自动对口型） | `ref_image_0` `ref_audio_0` |
+| `my_tts_workflow` | 语音合成（配音用） | `prompt_text`，`prompt_simple`(参考音) |
 
-计费按秒（如首尾帧 768p：高峰 ¥0.04/秒、空闲 ¥0.03/秒），所以时长别乱拉长。
+时长类工作流通常按秒计费，别乱拉长。
 
 ### 分辨率枚举
 
-短剧竖屏用 **`768p_portrait` = 768×1344**（另有 480p竖/768p_landscape/1080p竖/1:1 等）。
-工作台会用 `aspectValues` 把「按画幅算出来的尺寸」映射成这个枚举：
+短剧竖屏常用 **768×1344**。有些平台不收 `768x1344` 这样的字面尺寸，只收自己的枚举值，
+这时用 `aspectValues` 把「按画幅算出来的尺寸」映射过去：
 
 ```jsonc
 "aspectValues": { "768x1344": "768p_portrait", "1344x768": "768p_landscape" }
@@ -310,7 +302,7 @@ PUT  {host}/api/v1/file           分片 multipart：FileToken/md5/chunk/chunks/
   },
   "submit": {
     "method": "POST",
-    "path": "/api/v1/comfyui/workflow/my_first_last_frame_workflow",
+    "path": "/api/v1/workflow/my_first_last_frame_workflow",
     "body": {
       "prompt": "{{prompt}}",
       "first_frame": "{{image1}}",
@@ -322,7 +314,7 @@ PUT  {host}/api/v1/file           分片 multipart：FileToken/md5/chunk/chunks/
   "taskIdPath": "/data/task_id",
   "poll": {
     "method": "GET",
-    "path": "/api/v1/comfyui/comfyui_workflow/result/{{taskId}}",
+    "path": "/api/v1/workflow/result/{{taskId}}",
     "statusPath": "/data/status",
     "successValues": ["SUCCESS", "completed"],
     "failureValues": ["FAILED"],
@@ -337,16 +329,18 @@ PUT  {host}/api/v1/file           分片 multipart：FileToken/md5/chunk/chunks/
 把资产图放进 `ref_images`。多图参考工作流里 `ref_image_0..8` 依次对应 `{{image1}}..{{image9}}`，
 没给的会自动从请求体里去掉（而不是发一个空字符串）。
 
-## 还没验证的两点
+## 接新接口时的排查顺序
 
-诚实起见标注清楚，这两条要等有 Token 实测：
+真接一个没见过的接口，按这个顺序试最省事：
 
-1. **`Authorization` 到底是裸 Token 还是 `Bearer`** —— 文档示例写的是 `Authorization: 您的Token令牌`，
-   我按裸 Token（`authStyle: "raw"`）配的。若报 401，把它改成 `bearer` 再试。
-2. **上传后用 md5 引用是否正确** —— 上传协议是从平台前端代码里逆出来的（`cg-upload` 模块），
-   但「上传完的文件在 workflow 请求体里怎么引用」文档没写。目前按 md5 传。
-   若服务端说找不到图片，登录后在网站的工作流页「在线调用」里传一张图，
-   打开浏览器 Network 看提交请求体里那个字段的真实值，然后改 `refTemplate`
+1. **认证风格** —— 先确认是 `Bearer <token>` 还是裸 `<token>`。文档常写成
+   `Authorization: 您的Token`，那就先试 `authStyle: "raw"`；报 401 就换回 `bearer`。
+2. **提交是否异步** —— 提交后返回体里有没有 task id。有就配 `taskIdPath` + `poll`，
+   没有就直接配 `result`。
+3. **结果路径** —— 拿一次真实返回体，把 `urlPath` 指到那个字段上。
+4. **图片怎么给** —— 收 data-url / base64 就直接用；收「图片 URL」就加 `upload` 段，
+   并用 `refTemplate` 说明传完之后 `{{imageN}}` 该换成什么值
    （支持 `{{md5}}` / `{{url}}` / `{{path}}`）。
+5. **尺寸** —— 接口不认 `WxH` 字面值就加 `aspectValues` 映射。
 
-这两点都只需要改配置，不用改代码。
+以上全部只改配置，不用改代码。

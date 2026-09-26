@@ -42,10 +42,10 @@
 //! ```
 //!
 //! 认证方式用 `authStyle` 选：`bearer`（默认，`Authorization: Bearer xxx`）、
-//! `raw`（`Authorization: xxx`，第三方平台 用这种）、`none`。
+//! `raw`（`Authorization: xxx`，有些平台不带 `Bearer` 前缀）、`none`。
 //!
 //! 图片变量 `{{image1}}` `{{image2}}` … 默认给 data-url。**如果接口要求公网 URL**
-//! （第三方平台 的 `first_frame` / `ref_image_0` 就是），在 options 里配一段 `upload`，
+//! （例如 ComfyUI 工作流平台的 `first_frame` / `ref_image_0`），在 options 里配一段 `upload`，
 //! 本地图片会先传上去，`{{image1}}` 换成上传后的引用值。另外始终可用
 //! `{{image1data}}`（data-url）、`{{image1raw}}`（纯 base64）。
 //!

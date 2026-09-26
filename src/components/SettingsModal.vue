@@ -44,7 +44,7 @@ const varHint = "{{变量}}";
 /* ------------------------------------------------------------ 预设 */
 const PRESETS = [
   {
-    key: "simon-image",
+    key: "openai-image",
     label: "图片生成 · OpenAI 兼容",
     kind: "image" as ProviderKind,
     make: () => ({
@@ -68,9 +68,9 @@ const PRESETS = [
         authStyle: "raw",
         aspectValues: { "768x1344": "768p_portrait", "1344x768": "768p_landscape", "768x768": "768p_square" },
         upload: { mode: "chunked", beforePath: "/api/v1/file/before_upload", initPath: "/api/v1/file", chunkPath: "/api/v1/file", field: "file", refTemplate: "{{md5}}" },
-        submit: { method: "POST", path: "/api/v1/comfyui/workflow/my_first_last_frame_workflow", body: { prompt: "{{prompt}}", first_frame: "{{image1}}", last_frame: "{{image2}}", duration: "{{durationInt}}", resolution: "{{aspect}}" } },
+        submit: { method: "POST", path: "/api/v1/workflow/first_last_frame", body: { prompt: "{{prompt}}", first_frame: "{{image1}}", last_frame: "{{image2}}", duration: "{{durationInt}}", resolution: "{{aspect}}" } },
         taskIdPath: "/data/task_id",
-        poll: { method: "GET", path: "/api/v1/comfyui/comfyui_workflow/result/{{taskId}}", statusPath: "/data/status", successValues: ["SUCCESS", "completed"], failureValues: ["FAILED"], intervalSec: 6, timeoutSec: 1800 },
+        poll: { method: "GET", path: "/api/v1/workflow/result/{{taskId}}", statusPath: "/data/status", successValues: ["SUCCESS", "completed"], failureValues: ["FAILED"], intervalSec: 6, timeoutSec: 1800 },
         result: { urlPath: ["/data/results/0/url"] },
       },
     }),
@@ -87,7 +87,7 @@ const PRESETS = [
         aspectValues: { "768x1344": "768p_portrait", "1344x768": "768p_landscape", "768x768": "768p_square" },
         upload: { mode: "chunked", beforePath: "/api/v1/file/before_upload", initPath: "/api/v1/file", chunkPath: "/api/v1/file", field: "file", refTemplate: "{{md5}}" },
         submit: {
-          method: "POST", path: "/api/v1/comfyui/workflow/my_multi_ref_workflow",
+          method: "POST", path: "/api/v1/workflow/multi_ref",
           body: {
             prompt: "{{prompt}}", seed: "{{seed}}", duration: "{{durationInt}}", resolution: "{{aspect}}",
             ref_image_0: "{{image1}}", ref_image_1: "{{image2}}", ref_image_2: "{{image3}}",
@@ -96,7 +96,7 @@ const PRESETS = [
           },
         },
         taskIdPath: "/data/task_id",
-        poll: { method: "GET", path: "/api/v1/comfyui/comfyui_workflow/result/{{taskId}}", statusPath: "/data/status", successValues: ["SUCCESS", "completed"], failureValues: ["FAILED"], intervalSec: 6, timeoutSec: 1800 },
+        poll: { method: "GET", path: "/api/v1/workflow/result/{{taskId}}", statusPath: "/data/status", successValues: ["SUCCESS", "completed"], failureValues: ["FAILED"], intervalSec: 6, timeoutSec: 1800 },
         result: { urlPath: ["/data/results/0/url"] },
       },
     }),

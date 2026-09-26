@@ -1,363 +1,449 @@
-# Simon 短剧工作台
+# Duanju Workbench
 
-Tauri 2 + Vue 3 的短剧全流程制作工作台。九个面板串起从剧本到成片的完整链路，
-助手 **Simon** 全程参与：它能跨面板直接读写项目数据、调用生图生视频接口、铺时间线。
+**English** · [中文说明](README_zh_cn.md)
+
+A desktop workbench that takes a short-form drama from script to finished cut. Nine panels
+cover the whole pipeline, and a built-in agent — **Simon** — works across all of them:
+it can read and write project data, call image/video generation endpoints, and build the
+timeline for you.
 
 ```
-剧本 → 风格 → 分镜 → 资产 → 3D预演 → 视频提示词 → 生视频 → 剪辑 → 字幕
+Script → Style → Storyboard → Assets → 3D Previz → Video Prompts → Generate → Edit → Subtitles
 ```
 
-### 3D 预演（导演台）
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Tauri](https://img.shields.io/badge/Tauri-2-24C8DB.svg)](https://tauri.app/)
+[![Vue](https://img.shields.io/badge/Vue-3-42b883.svg)](https://vuejs.org/)
 
-预演面板集成 [导演台 DirectorDesk](https://github.com/mangfufu/director-desk)（MIT 开源）：
-搭白模场景、摆人物走位、设计多机位与运镜（希区柯克变焦 / 手持晃动等预设）、排灯光，
-最后导出参考视频。
+> Not affiliated with any model provider. Text, image, and video backends are all pluggable —
+> see [docs/PROVIDER.md](docs/PROVIDER.md). **The docs under `docs/` are currently written in Chinese.**
 
-- **开箱即用**：它的构建产物随应用打包（`npm run director:prepare` 从上游 clone →
-  打补丁 → 构建 → 部署；上游约几个月更新一次，重跑一次即可）；
-- **工程随项目**：顶部条「保存工程 / 恢复工程」写进 `<项目>/previz/director.json`，
-  换台机器接着改；
-- **agent 可操作**：对 Simon 说「读一下预演工程，在舞台上加个人物、设计一条从左到右的运镜」，
-  两个引擎（自研 / pi）都会调用导演台的能力读工程、布景、排走位、设计运镜。
+## Contents
 
-## 快速开始
+- [Highlights](#highlights)
+- [Quick start](#quick-start)
+- [Before your first run](#before-your-first-run)
+- [Project layout](#project-layout)
+- [Simon: one agent, shared context](#simon-one-agent-shared-context)
+- [Skills](#skills)
+- [Prompt caching](#prompt-caching)
+- [whisper GPU acceleration](#whisper-gpu-acceleration)
+- [ffmpeg](#ffmpeg)
+- [Known limitations](#known-limitations)
+- [Third-party components](#third-party-components)
+- [License](#license)
+
+## Highlights
+
+- **Nine panels, one pipeline** — script, style bible, storyboard, assets, 3D previz,
+  video prompts, generation, editing, subtitles. Everything lives in a plain project
+  directory; no database.
+- **An agent that actually operates the app** — 47 tools, merged into one shared toolset,
+  so it can chain work across panels in a single turn.
+- **Runs with zero configuration** — no text model configured falls back to a placeholder
+  adapter; no image/video endpoint configured falls back to ffmpeg-generated placeholder
+  assets. The entire pipeline (including edit export and subtitles) is runnable out of the box.
+- **Prompt caching as a design constraint** — the system prompt is split into a frozen
+  prefix plus an append-only tail, so the server-side prefix cache keeps hitting even as
+  your project data changes.
+- **Two agent engines** — a built-in one, and an optional [pi](https://github.com/earendil-works/pi)
+  sidecar that reuses the exact same tools, approvals, and validation.
+
+### 3D previz (DirectorDesk)
+
+The previz panel integrates [DirectorDesk](https://github.com/mangfufu/director-desk) (MIT):
+block out a grey-box set, place characters, design multi-camera work and camera moves
+(Hitchcock zoom, handheld shake presets, …), light the scene, and export a reference video.
+
+- **Works out of the box** — its build output ships inside the app
+  (`npm run director:prepare` clones upstream → patches → builds → deploys; upstream moves
+  every few months, so re-running it occasionally is enough).
+- **The project travels with the scene** — "Save / Restore project" in the top bar writes to
+  `<project>/previz/director.json`, so you can pick it up on another machine.
+- **Agent-operable** — tell Simon "read the previz project, add a character to the stage and
+  design a left-to-right camera move" and both engines (built-in and pi) will drive
+  DirectorDesk: read the project, dress the set, block movement, design camera work.
+  The panel doesn't even need to be open — the agent switches to it automatically.
+- **The agent can *see* it** — `director_frame` renders the current camera (or the staging
+  view) into an image and puts it in the model's context, so it checks composition, character
+  facing, and interpenetration by actually looking, instead of claiming "it's all placed".
+
+## Quick start
 
 ```bash
-npm install          # 依赖（见下方「为什么用 npm」）
-npm run app:dev      # 开发调试：起 vite + 编译 Rust + 打开窗口
-npm run app:build    # 出安装包（NSIS）+ release 可执行文件
-npm run pack         # 收拢成绿色版目录 app/，并在桌面建快捷方式
+npm install          # dependencies
+npm run app:dev      # dev: vite + cargo build + open the window
+npm run app:build    # produce installers (NSIS) + a release binary
+npm run pack         # gather a portable app/ directory and create a desktop shortcut
 ```
 
-> `npm run pack` 会把 `target/release` 里的主程序与 sidecar 拷到 `app/`，路径稳定
-> （`cargo clean` 不会影响它），整个 `app/` 目录可以直接拷到别的 Windows 机器上用
-> ——前提是那台机器有 WebView2 运行时，Win11 自带，Win10 需要装一次。
+> `npm run pack` copies the main binary and sidecars out of `target/release` into `app/`,
+> where the paths stay stable (a `cargo clean` won't disturb them). The whole `app/` directory
+> can be copied to another Windows machine and run directly — provided WebView2 is present
+> (bundled on Windows 11; a one-time install on Windows 10).
 
-> 命令行自检只在 **debug 构建**下看得到输出：release 版是 GUI 子系统程序，没有控制台。
+> Command-line self-checks only print under **debug builds**: the release binary is a GUI
+> subsystem program with no console attached.
 
-首次运行会创建配置目录：
+On first run a config directory is created:
 
-| 平台 | 位置 |
+| Platform | Location |
 | --- | --- |
 | Windows | `%APPDATA%\com.duanju.workbench\` |
 | macOS | `~/Library/Application Support/com.duanju.workbench/` |
 
-里面是 `settings.json`（偏好与供应商列表）、`secrets.json`（API Key）、`models/`（whisper 模型）。
+It holds `settings.json` (preferences and provider list), `secrets.json` (API keys), and
+`models/` (whisper models).
 
-不想开界面也能自检（出问题时先跑这个）：
+You can run self-checks without opening the UI (try this first when something breaks):
 
 ```bash
 cd src-tauri
-cargo run -- --net-check                         # 代理设置 + 模型仓库连通性
-cargo run -- --pipeline-check                    # 整条生产链跑一遍（用占位模型/占位素材）
-cargo run -- --asr-download ggml-large-v3-turbo  # 预下载 whisper 模型
+cargo run -- --net-check                         # proxy settings + model registry reachability
+cargo run -- --pipeline-check                    # run the whole production chain (placeholder model/assets)
+cargo run -- --asr-download ggml-large-v3-turbo  # pre-download a whisper model
 ```
 
-## 网络与代理
+## Networking and proxies
 
-v2rayN / Clash 这类工具通常只改**系统代理**，不写环境变量；而 HTTP 库默认只认环境变量，
-于是会出现「浏览器能上、应用连不上」。工作台的做法：
+Tools like v2rayN / Clash typically only set the **system proxy** and don't write environment
+variables, while HTTP libraries only honour environment variables by default — so you get
+"the browser works but the app can't connect". The workbench handles this:
 
-- 默认「**跟随系统**」：先看环境变量，再读 Windows 注册表里的
-  `Internet Settings\ProxyServer`（macOS 走 `scutil --proxy`），自动用上；
-- 也可以切成「直连」或「手动指定」（支持 `http://` 与 `socks5://`）；
-- **本机地址永远直连**（127.0.0.1 / 局域网段），本地的 vLLM / Ollama / ComfyUI 不受影响；
-- 「设置 → 运行环境」里能看到系统代理、环境变量、实际使用值，并有「测试连通性」按钮。
+- **Follow system** by default: reads environment variables first, then the Windows registry
+  `Internet Settings\ProxyServer` (or `scutil --proxy` on macOS), and uses what it finds.
+- Or switch to **direct** or **manual** (supports `http://` and `socks5://`).
+- **Loopback addresses always bypass the proxy** (127.0.0.1 / LAN ranges), so a local
+  vLLM / Ollama / ComfyUI is unaffected.
+- "Settings → Runtime" shows the system proxy, the environment variables, and the value
+  actually in use, plus a "Test connectivity" button.
 
-改了代理设置会自动重建 HTTP 客户端，不用重启。
+Changing proxy settings rebuilds the HTTP client automatically — no restart needed.
 
-## 开工前三件事
+## Before your first run
 
-1. **配模型接口** —— 右上角「设置 → 模型供应商」。文本模型支持 OpenAI 兼容端点与
-   Anthropic 原生；生图 / 生视频用「通用 HTTP」适配器，接口格式写在配置里，
-   详见 [docs/PROVIDER.md](docs/PROVIDER.md)。
-2. **不配也能跑** —— 没配文本模型时 agent 走占位适配器；没配生图 / 生视频接口时
-   用 ffmpeg 生成占位素材。整条流程（含剪辑导出、字幕）都能完整走一遍。
-3. **字幕的显卡加速是编译期的** —— 见下方「whisper 显卡加速」。
+1. **Configure a model endpoint** — top right, "Settings → Providers". Text models support
+   OpenAI-compatible endpoints and Anthropic's native API; image/video generation use the
+   generic HTTP adapter, where the request format is part of the configuration. See
+   [docs/PROVIDER.md](docs/PROVIDER.md) *(Chinese)*.
+2. **Or don't configure anything** — see "Runs with zero configuration" above.
+3. **GPU acceleration for subtitles is a compile-time choice** — see
+   [whisper GPU acceleration](#whisper-gpu-acceleration).
 
-## 界面与设计系统
+## UI and design system
 
-前端没有用组件库，自研了一套轻量设计系统（`src/ui/`，约 20 个组件：
-按钮、输入、下拉、开关、标签输入、模态、抽屉、提示、Toast、确认框…）。
-这样做的好处是视觉完全可控，代价是要自己维护交互细节。
+The frontend uses no component library; it ships a small in-house design system
+(`src/ui/`, ~20 components: button, input, select, switch, tag input, modal, drawer,
+tooltip, toast, confirm dialog, …). The upside is total control over the visuals; the
+cost is maintaining the interaction details yourself.
 
-三条设计原则（改样式时请守住）：
+Three design rules (please keep them when changing styles):
 
-1. **边框用白色低透明度**（`rgba(255,255,255,.07)`）而不是灰色实线。
-   灰线在深色底上会形成一圈"描边"，看起来又脏又挤。
-2. **用表面层级表达结构**，别到处画边框。`--surface-1..5` 的明度差本身就是分隔。
-3. **留白要够**。面板内边距 16px 起，头高 44~48px，宁可少放点内容。
+1. **Borders are low-opacity white** (`rgba(255,255,255,.07)`), not solid grey.
+   A grey line on a dark background reads as an outline — dirty and cramped.
+2. **Express structure with surface elevation**, not borders everywhere. The lightness
+   steps of `--surface-1..5` are the separation.
+3. **Give it room.** Panel padding starts at 16px, headers are 44–48px tall — better to
+   show less content.
 
-配色、间距、圆角、字号全部收在 `src/ui/tokens.css`，改主题只动这一个文件。
+Colors, spacing, radii, and font sizes all live in `src/ui/tokens.css`; to re-theme,
+touch only that file.
 
-**深色 / 浅色**两套主题都在 tokens.css 里（`[data-theme="light"]` 覆盖同名变量），
-侧栏底部的按钮切换，设置里持久化。组件里不要写死颜色 —— 需要新颜色就先加变量。
+Both **dark and light** themes live in `tokens.css` (`[data-theme="light"]` overrides the
+same variables). The switch is at the bottom of the sidebar and the choice is persisted.
+Don't hard-code colors in components — add a variable first.
 
-### 不装桌面程序也能调界面
+### Working on the UI without the desktop app
 
 ```bash
-npm run dev     # 浏览器打开 http://localhost:1420
+npm run dev     # open http://localhost:1420
 ```
 
-在浏览器里没有 Tauri 运行时，`src/api/ipc.ts` 会自动把命令路由到
-`src/dev/mock.ts` —— 一份像样的示例项目（4 章剧本、6 个镜头、4 个资产、
-带工具调用的 agent 对话记录）。改界面时不用每次编译 Rust，也方便截图对比。
-mock 只在浏览器里加载，打包进桌面版不会带上。
+With no Tauri runtime, `src/api/ipc.ts` routes commands to `src/dev/mock.ts` instead — a
+realistic sample project (4 script chapters, 6 shots, 4 assets, an agent conversation with
+tool calls). No Rust rebuild needed when tweaking the UI, which also makes screenshots easy
+to compare. The mock only loads in the browser and is never bundled into the desktop build.
 
-## 项目目录长什么样
+## Project layout
 
-每个项目就是一个普通目录，没有数据库，拷走就能在另一台机器打开（包括 Apple Silicon）：
+Every project is just a plain directory — no database, and copying it to another machine
+(including Apple Silicon) is enough to open it:
 
 ```
-我的短剧/
-  project.json              项目清单
-  bible.json                项目圣经（设定 / 人物 / 卖点）
-  script/index.json         章节索引
-  script/chapters/*.md      章节正文（Markdown，可以直接改）
-  style/style.json          画面风格圣经
-  storyboard/index.json     镜头表
-  assets/index.json         资产清单
-  assets/files/<资产>/*.png  人物三视图 / 场景 / 物件
-  prompts/video_prompts.json 视频提示词与资产配对
-  video/takes.json          生成结果清单
-  video/files/*.mp4         生成的视频
-  edit/timeline.json        时间线
-  edit/renders/*.mp4        导出的成片
-  subtitles/                字幕（srt / vtt）
-  checklist/checklist.json  检查清单
-  .workbench/               运行时数据，可以整个删掉
+my-drama/
+  project.json               project manifest
+  bible.json                 project bible (setting / characters / hooks)
+  script/index.json          chapter index
+  script/chapters/*.md       chapter bodies (Markdown — edit them directly)
+  style/style.json           visual style bible
+  storyboard/index.json      shot list
+  assets/index.json          asset manifest
+  assets/files/<asset>/*.png character turnarounds / scenes / props
+  prompts/video_prompts.json video prompts and their asset bindings
+  video/takes.json           generation results
+  video/files/*.mp4          generated video
+  edit/timeline.json         timeline
+  edit/renders/*.mp4         exported cuts
+  subtitles/                 subtitles (srt / vtt)
+  checklist/checklist.json   checklist
+  .workbench/                runtime data — safe to delete entirely
 ```
 
-## Simon：共享上下文的助手
+## Simon: one agent, shared context
 
-Simon 是**一个**助手，不是九个。它不按面板分割上下文，工具集也是合并的 ——
-你在剧本面板让它「把分镜写完然后建资产」，它会依次调用两个面板的工具。
-面板只决定开场白与快捷提示，不限制它的能力范围。也正因如此，切换面板不会让
-提示词前缀失效，缓存反而更稳。
+Simon is **one** assistant, not nine. It doesn't partition context per panel, and its toolset
+is merged — ask it in the script panel to "finish the storyboard and then create the assets"
+and it will call tools from both panels in sequence. Panels only decide the opening line and
+quick suggestions; they don't limit what it can do. A useful side effect: switching panels
+doesn't invalidate the prompt prefix, so the cache stays more stable.
 
-入口是右下角的悬浮按钮，点开是一个浮窗。副作用是面板能拿到全部宽度。
+It lives behind the floating button in the bottom-right corner. Opening it as a floating
+window is what lets panels take the full width.
 
-### 两个对话引擎
+### Two engines
 
-浮窗输入框下方有一个引擎切换按钮：
+There's an engine toggle below the input box:
 
-- **自研引擎**（默认）—— 项目内置的 agent：38 个工具、冻结前缀缓存、花钱确认流，
-  完全离线可用（没配模型时走占位适配器）。
-- **pi 引擎**（可选）—— 对接 [pi](https://github.com/earendil-works/pi)（MIT 的开源
-  agent harness）。以 sidecar 子进程方式常驻，走它的 RPC 协议；事件流会翻译成与自研
-  引擎相同的事件类型，因此界面渲染完全复用。pi 内置的 shell / 文件工具被显式关闭，
-  它能用的 38 个工具全部经本地桥回调到同一套 `actions`，**副作用、审批、数据校验与
-  自研引擎完全一致**；花钱操作会走 pi 的确认协议弹出审批卡片。
-  会话存在项目 `.workbench/pi/` 下，换项目自动切换。
+- **Built-in** (default) — the project's own agent: 47 tools, a frozen prefix cache, and a
+  spend-confirmation flow. Fully usable offline (the placeholder adapter runs when no model
+  is configured).
+- **pi** (optional) — talks to [pi](https://github.com/earendil-works/pi), an MIT-licensed
+  open-source agent harness. It runs permanently as a sidecar subprocess over its RPC
+  protocol; its event stream is translated into the same event types as the built-in engine,
+  so the UI reuses the rendering path entirely. pi's own shell and file tools are explicitly
+  disabled — the 47 tools it can use all round-trip through a local bridge into the same
+  `actions`, so **side effects, approvals, and data validation are identical** to the built-in
+  engine. Spend operations go through pi's confirmation protocol and surface an approval card.
+  Sessions are stored under the project's `.workbench/pi/`, switching automatically with the
+  project.
 
-需要文本模型 provider（设置 → 模型供应商，OpenAI 兼容端点即可），密钥只经环境变量
-传给子进程，不落盘。
+A text-model provider is required (Settings → Providers; any OpenAI-compatible endpoint will
+do). The key is passed to the subprocess via an environment variable only and never touches disk.
 
-### 随包分发（安装即用）
+### Bundled runtime (install and go)
 
-安装包自带全部运行时，用户不需要自己装任何东西：
+Installers ship every runtime, so users don't have to install anything themselves:
 
-| 组件 | 用途 | 形态 |
+| Component | Purpose | Form |
 | --- | --- | --- |
-| node + pi 运行时 | pi 引擎 sidecar | `sidecar/pi/`（约 460MB） |
-| ffmpeg / ffprobe | 转码、剪辑导出 | `binaries/`（约 200MB） |
-| whisper-cli | 字幕转写（CPU 推理） | `binaries/` |
-| whisper small 模型 | 转写默认模型 | `models/`（约 470MB，首启自动补种到用户目录） |
+| node + pi runtime | pi engine sidecar | `sidecar/pi/` (~460 MB) |
+| ffmpeg / ffprobe | transcoding, edit export | `binaries/` (~200 MB) |
+| whisper-cli | subtitle transcription (CPU inference) | `binaries/` |
+| whisper small model | default transcription model | `models/` (~470 MB, seeded to the user directory on first launch) |
 
-准备脚本：`node scripts/prepare-sidecar.mjs`（幂等，按需补齐/更新各组件）。
+Preparation script: `node scripts/prepare-sidecar.mjs` (idempotent; fills in or updates each
+component as needed).
 
-**两种分发形态**：
+**Two distribution forms:**
 
-- **安装包**：`npm run app:build` → NSIS / MSI 安装器（约 580 / 660 MB）。
-- **绿色版（portable）**：`npm run pack` → 产出 `app/` 目录（约 1.1 GB），
-  整个目录拷到任意机器直接运行，无需安装。目录里已含全部运行时（exe 旁边的
-  `binaries/`、`models/`、`sidecar/`）。唯一系统依赖是 WebView2 运行时——
-  Win11 自带，Win10 一般也随系统更新预装。
+- **Installer**: `npm run app:build` → NSIS / MSI installers (~580 / 660 MB).
+- **Portable**: `npm run pack` → an `app/` directory (~1.1 GB) that runs from anywhere without
+  installation. All runtimes are already inside it (`binaries/`, `models/`, `sidecar/` next to
+  the exe). The only system dependency is the WebView2 runtime — bundled on Windows 11 and
+  normally preinstalled by Windows Update on Windows 10.
 
+### Three permission modes
 
-### 三种权限模式
-
-| 模式 | 行为 |
+| Mode | Behaviour |
 | --- | --- |
-| **YOLO** | 任何操作直接执行，完全不打断 |
-| **自动编辑**（默认） | 改数据自动执行，只有生图 / 生视频这类花钱的操作才弹确认 |
-| **变更前确认** | 任何会改动项目数据的操作，执行前都先问一次 |
+| **YOLO** | Everything executes immediately, no interruptions |
+| **Auto-edit** (default) | Data changes run automatically; only spend operations (image/video generation) ask first |
+| **Confirm before change** | Any operation that mutates project data asks first |
 
-判断依据是工具是否在只读白名单里（`src-tauri/src/agent/tools.rs` 的 `READ_ONLY_TOOLS`）。
+The criterion is whether a tool is on the read-only allowlist (`READ_ONLY_TOOLS` in
+`src-tauri/src/agent/tools.rs`).
 
-### 上下文管理
+### Context management
 
-对话不能无限长，Simon 这边有三层手段：
+Conversations can't grow forever. Three mechanisms keep Simon's context in check:
 
-**1. 按需喂 —— 别一次全塞进去**
+**1. Feed on demand — don't dump everything in**
 
-输入框里打 `@` 可以点名引用：技能、章节、资产。只有你点的东西会随这条消息带进去，
-其余一律留在外面。
+Type `@` in the input to reference skills, chapters, and assets explicitly. Only what you
+name travels with that message; everything else stays out.
 
 ```
-帮我按 @skill:剧本节奏检查 过一遍 @chapter:3
+Walk @chapter:3 through @skill:script-pacing-check
 ```
 
-**2. 主动压缩 —— 水位到了才动手**
+**2. Compact proactively — only when the water level rises**
 
-浮窗顶部的百分比是上下文水位（鼠标悬停看明细：对话多少、其中工具结果多少、
-冻结前缀多少）。超过预算的 75% 自动压缩，也可以手动点。
+The percentage at the top of the window is the context water level (hover for a breakdown:
+conversation, how much of it is tool results, frozen prefix). Past 75% of budget it compacts
+automatically, and you can also trigger it manually.
 
-压缩分两刀，先轻后重：
+Compaction comes in two cuts, light first:
 
-| 顺序 | 做什么 | 代价 |
+| Order | What it does | Cost |
 | --- | --- | --- |
-| 第一刀 | 把早期工具结果的**原文**换成一个短说明 | 免费、零风险 |
-| 第二刀 | 让模型把前半段对话压成一段简报 | 一次模型调用 |
+| First cut | Replaces the **raw text** of early tool results with a short description | Free, zero risk |
+| Second cut | Has the model summarise the first half of the conversation | One model call |
 
-工具结果往往是最大的一块 —— 一次 `project_snapshot` 就能上万 token，而它只在被调用的
-那一刻有用。所以第一刀经常就够了。
+Tool results are usually the biggest block — a single `project_snapshot` can run into tens of
+thousands of tokens, and it was only useful at the moment it was called. So the first cut
+often suffices.
 
-**关键**：压缩只动对话尾部，**冻结前缀不受影响**，那块缓存不会被压掉。
+**Crucially**: compaction only touches the tail of the conversation — the **frozen prefix is
+untouched**, so that cache is never compacted away.
 
-预算和自动压缩开关在「设置 → 运行环境 → Agent 行为」。
+Budget and the auto-compaction switch are under "Settings → Runtime → Agent behaviour".
 
-**3. 换新对话 —— 最干净的上下文**
+**3. Start a new conversation — the cleanest context there is**
 
-浮窗标题栏的下拉里能看到所有对话、随时切换，也可以新建一个从零开始的。
-旧对话都留着，切回来接着聊。
+The dropdown in the window's title bar lists every conversation and lets you switch at any
+time, or start a fresh one from zero. Old conversations stick around; switch back and carry on.
 
-### 它会主动问你
+### It asks you when it's unsure
 
-拿不准的时候 Simon 会用 `ask_user` 提问，前端渲染成一张卡片：可以给候选项按钮，
-也可以让你自由作答。它问完就停下等，不会自己猜着往下做。
+When Simon is uncertain it uses `ask_user`, which the frontend renders as a card: you can
+get option buttons or free-form input. It then stops and waits rather than guessing its way
+forward.
 
-## 技能（Skills）
+## Skills
 
-把你自己的流程、规范、方法论装进来，Simon 用得上时自己取。
+Drop in your own processes, conventions, and methodologies — Simon picks them up when they're
+relevant.
 
-技能放在 `<配置目录>/skills/`，采用通用的 Agent Skills 目录格式，现成的技能包可以直接拷进来：
+Skills live in `<config dir>/skills/` and use the generic Agent Skills directory format, so
+existing skill packs can be copied straight in:
 
 ```
 skills/
-  剧本节奏检查.md          ← 单文件技能
-  qch-methodology/        ← 目录技能
-    SKILL.md              ← 必需，带 frontmatter
-    references/           ← 可选，附件
+  script-pacing-check.md   ← single-file skill
+  my-methodology/          ← directory skill
+    SKILL.md               ← required, with frontmatter
+    references/            ← optional attachments
       visual-dna.md
 ```
 
-`SKILL.md` 的 frontmatter：
+`SKILL.md` frontmatter:
 
 ```markdown
 ---
-name: 剧本节奏检查
-description: 用户要检查或优化短剧剧本节奏时使用，含钩子密度与反转间隔的判定标准
+name: script-pacing-check
+description: Use when the user wants to review or improve short-drama script pacing, including hook density and reversal interval criteria
 ---
 ```
 
-**`description` 最重要** —— 它是模型判断要不要用这个技能的唯一依据。
-写「什么时候用」，别写「这是什么」。
+**`description` matters most** — it's the only thing the model has to decide whether to use a
+skill. Write *when to use it*, not *what it is*.
 
-### 三级渐进披露
+### Three-level progressive disclosure
 
-这是整套设计的关键，直接决定成本：
+This is the key to the whole design, and it directly determines cost:
 
-| 层级 | 内容 | 什么时候进上下文 |
+| Level | Content | When it enters context |
 | --- | --- | --- |
-| 1 | 名称 + 描述 | 永远在（系统提示的 L4 层，可缓存） |
-| 2 | SKILL.md 正文 | 模型判断对得上时，用 `skill_read` 取 |
-| 3 | 附件 | 真要用到时，用 `skill_read_file` 取 |
+| 1 | Name + description | Always (L4 layer of the system prompt, cacheable) |
+| 2 | `SKILL.md` body | When the model judges it relevant — fetched with `skill_read` |
+| 3 | Attachments | When actually needed — fetched with `skill_read_file` |
 
-实测：装 4 个技能、正文合计 4.6 万字，进系统提示的目录只有 **372 字**。
+Measured: with 4 skills installed and 46,000 characters of combined body text, the directory
+that enters the system prompt is only **372 characters**.
 
-导入方式：「设置 → 技能」
+Import via "Settings → Skills":
 
-- **选 `.zip`**（可多选）—— 最省事。一个 zip 里装一个技能、或装一整个合集，都能自动识别
-- 选技能目录，或装着多个技能的**合集目录**
-- 选单个 `.md`
+- **Pick a `.zip`** (multi-select) — easiest. A zip containing one skill or a whole collection
+  is recognised automatically.
+- Pick a skill directory, or a **collection directory** holding several skills.
+- Pick a single `.md`.
 
-命令行也能导，不用开界面：
+You can also import from the command line without opening the UI:
 
 ```bash
 cd src-tauri
-cargo run -- --import-skill D:/下载/剧本skill合集.zip
-cargo run -- --skills        # 看装了什么
+cargo run -- --import-skill D:/downloads/skill-pack.zip
+cargo run -- --skills        # see what's installed
 ```
 
-### 手上的 Word 文档
+### Working from Word documents
 
-先转成 Markdown 再导入，仓库里带了脚本：
+Convert to Markdown first, then import. A script ships with the repo:
 
 ```bash
-python scripts/docx2md.py 输入.docx 输出目录/ --kind style --name "我的风格圣经"
-python scripts/docx2md.py 某个目录/ 输出目录/ --guess-headings   # 批量，并还原小标题
+python scripts/docx2md.py input.docx out/ --kind style --name "My Style Bible"
+python scripts/docx2md.py some-dir/ out/ --guess-headings   # batch, restoring headings
 ```
 
-## 提示词缓存
+## Prompt caching
 
-这是本工作台在成本上最花心思的地方。
+This is where the workbench spends the most thought on cost.
 
-服务端前缀缓存（Anthropic 显式断点 / OpenAI 兼容端点的自动前缀缓存）都是**按前缀逐字节匹配**的：
-前面任何一个字符变了，从那里往后全部重新计费。所以决定命中率的不是「断点打在哪」，
-而是「前缀里有没有会变的东西」。
+Server-side prefix caching (Anthropic's explicit breakpoints, or the automatic prefix cache of
+OpenAI-compatible endpoints) matches **byte-for-byte on the prefix**: change one character and
+everything after it is re-billed. So what determines the hit rate isn't "where you put the
+breakpoint" but "is there anything in the prefix that changes".
 
-做法是把提示词切成两层：
+The approach splits the prompt into two layers:
 
-- **冻结前缀**（会话创建时构建一次，之后整场对话不变）
-  - `L0 核心指令` — 全局工作准则
-  - `L1 工作台职责` — 九个面板的产出规范（**不随当前面板变化**）
-  - `L2 项目圣经` — 设定、人物、风格圣经
-  - `L3 资产索引` — 资产清单与视图状态
-  - 会话首条消息里的**上下文快照**（当前面板、章节现状、缺口统计）
-- **增量尾部** —— 工具结果与新对话轮次，永远只追加，绝不回头改历史消息
+- **Frozen prefix** (built once when the session is created, then unchanged for the whole
+  conversation)
+  - `L0 Core instructions` — global working principles
+  - `L1 Workbench responsibilities` — output conventions for the nine panels (**does not vary
+    with the current panel**)
+  - `L2 Project bible` — setting, characters, style bible
+  - `L3 Asset index` — asset manifest and view status
+  - the **context snapshot** in the session's first message (current panel, chapter state,
+    gap statistics)
+- **Incremental tail** — tool results and new turns, always appended, never rewritten
 
-所以「项目数据变了」不会污染缓存：agent 需要新数据时调工具去读，结果落在尾部。
-对话坞右上角能看到实时命中率与各层 token 估算；点 ↻ 重建上下文会牺牲一次命中，
-换来 agent 看到最新数据。
+So "project data changed" doesn't pollute the cache: when the agent needs fresh data it calls
+a tool, and the result lands in the tail. The window's top right shows the live hit rate and
+per-layer token estimates; pressing ↻ rebuilds the context at the cost of one cache miss,
+in exchange for the agent seeing current data.
 
-改代码时请守住两条不变量（`src-tauri/src/agent/prompt.rs` 顶部有详细说明）：
+Two invariants to preserve when changing code (documented at the top of
+`src-tauri/src/agent/prompt.rs`):
 
-1. `ChatRequest.system` 一旦冻结就不再变；
-2. `messages` 只追加，历史消息永不改写。
+1. Once `ChatRequest.system` is frozen, it never changes.
+2. `messages` is append-only; historical messages are never rewritten.
 
-工具定义的顺序与字段顺序同样影响缓存，所以 `agent/tools.rs` 的注册顺序是固定的，
-不要改成 HashMap 遍历。
+Tool definition order and field order affect the cache too, which is why the registration
+order in `agent/tools.rs` is fixed — don't turn it into a HashMap iteration.
 
-## whisper 显卡加速
+## whisper GPU acceleration
 
-转写走本地 whisper.cpp，有两条路：
+Transcription runs on a local whisper.cpp, via one of two paths:
 
-1. **进程内推理**（需要带 feature 编译）
+1. **In-process inference** (requires building with a feature)
    ```bash
    # Windows / Linux + NVIDIA
    cargo build --features asr-cuda
    # Apple Silicon
    cargo build --features asr-metal
-   # 纯 CPU
+   # CPU only
    cargo build --features asr
    ```
-   需要 `cmake` 与 `libclang`（LLVM）。后端是**编译期**决定的，换显卡要重新编译。
-   运行时「是否使用显卡」这个开关只在已编译进去的后端范围内生效。
-2. **外部 whisper-cli** —— 把 whisper.cpp 官方的 `whisper-cli` 放到应用目录，
-   或在设置里指定路径。默认构建走这条路，不需要 libclang。
+   Requires `cmake` and `libclang` (LLVM). The backend is decided **at compile time**;
+   changing GPUs means rebuilding. The "use GPU" runtime toggle only applies within the
+   backends that were compiled in.
+2. **External whisper-cli** — put whisper.cpp's official `whisper-cli` next to the app, or
+   point to it in settings. The default build takes this path and doesn't need libclang.
 
-两条路都先用 ffmpeg 把素材转成 16kHz 单声道 wav，保证输入一致。
-字幕面板会显示本机检测结果（显卡型号、CUDA 版本、推荐后端、已编译后端）。
+Both paths first use ffmpeg to normalise input to 16 kHz mono wav, so the input is consistent.
+The subtitle panel shows local detection results (GPU model, CUDA version, recommended
+backend, compiled backend).
 
-**模型下载**：默认从 HuggingFace 拉 ggml 模型。国内网络访问不了时，
-在「设置 → 字幕 → 下载源」切到 `hf-mirror` 镜像，或者自己下载 `ggml-*.bin`
-丢进「模型目录」（设置里能直接打开该目录）。命令行预下载见上面的 `--asr-download`。
+**Model downloads**: ggml models are pulled from HuggingFace by default. If that's unreachable,
+switch "Settings → Subtitles → Download source" to the `hf-mirror` mirror, or download a
+`ggml-*.bin` yourself and drop it into the "model directory" (which settings can open for you).
+For command-line pre-download see `--asr-download` above.
 
 ## ffmpeg
 
-发行版随包携带 `ffmpeg` / `ffprobe`（`src-tauri/binaries/`）。
-开发期如果找不到 sidecar，会临时回退到系统 PATH，并在日志里提醒。
-也可以在「设置 → 运行环境」里手动指定路径。
+Release builds bundle `ffmpeg` / `ffprobe` (`src-tauri/binaries/`). During development, if the
+sidecar isn't found it falls back to the system PATH and warns in the log. You can also point
+to them manually under "Settings → Runtime".
 
-放置 sidecar 的命名规则：
+Sidecar naming convention:
 
 ```
 src-tauri/binaries/ffmpeg-x86_64-pc-windows-msvc.exe
 src-tauri/binaries/ffprobe-x86_64-pc-windows-msvc.exe
 ```
 
-Windows 上直接从系统 ffmpeg 拷一份就行（名字里的三元组要和 `rustc -vV` 的 host 一致）：
+On Windows, copying the system ffmpeg is enough (the triple in the name must match
+`rustc -vV`'s host):
 
 ```bash
 cd src-tauri && mkdir -p binaries
@@ -365,51 +451,56 @@ cp "$(where.exe ffmpeg | head -1 | tr -d '\r')"  binaries/ffmpeg-x86_64-pc-windo
 cp "$(where.exe ffprobe | head -1 | tr -d '\r')" binaries/ffprobe-x86_64-pc-windows-msvc.exe
 ```
 
-> 这两个文件加起来约 440 MB，已在 `.gitignore` 里排除，别提交进仓库。
+> Those two files are ~440 MB combined and are excluded in `.gitignore` — don't commit them.
 
-## 为什么用 npm 而不是 pnpm
-
-本机上 pnpm 在 Windows 上安装 esbuild 时稳定报 `EPERM: rename`（文件被占用），
-换 `--package-import-method=copy` 也一样，npm 一次通过。所以 `tauri.conf.json` 里的
-`beforeDevCommand` / `beforeBuildCommand` 用的是 `npm run`。
-如果你那边 pnpm 正常，改回去也可以。
-
-## 目录结构
+## Repository layout
 
 ```
-src/                      前端
-  api/                    Tauri 命令封装 + 事件订阅
-  stores/                 Pinia：项目 / agent / 任务 / 设置
-  components/             对话坞、面板导航、顶栏、任务条、设置抽屉
-  views/panels/           九个面板
-  types/                  与 Rust 模型一一对应的 TS 类型
-src-tauri/src/            后端
-  models.rs               全部数据结构
-  project.rs / store.rs   项目目录布局与原子写
-  llm/                    供应商适配器（openai / anthropic / mock）
-  agent/                  会话、工具循环、缓存友好的提示词装配
-  gen/                    生图生视频（配置驱动的通用 HTTP 适配器）
-  actions.rs              高层动作，前端命令与 agent 工具共用
-  jobs.rs                 后台任务队列
-  media.rs                ffmpeg 调用与时间线导出
-  asr.rs                  whisper 能力探测、模型下载、转写
-  progress.rs             面板完成度判定（唯一事实来源）
-docs/                     接口配置与架构说明
+src/                      frontend
+  api/                    Tauri command wrappers + event subscriptions
+  stores/                 Pinia: project / agent / jobs / settings
+  components/             agent dock, panel navigation, top bar, job bar, settings drawer
+  views/panels/           the nine panels
+  types/                  TS types mirroring the Rust models
+src-tauri/src/            backend
+  models.rs               all data structures
+  project.rs / store.rs   project directory layout and atomic writes
+  llm/                    provider adapters (openai / anthropic / mock)
+  agent/                  sessions, tool loop, cache-friendly prompt assembly
+  gen/                    image/video generation (config-driven generic HTTP adapter)
+  actions.rs              high-level actions shared by frontend commands and agent tools
+  jobs.rs                 background job queue
+  media.rs                ffmpeg invocation and timeline export
+  asr.rs                  whisper capability detection, model download, transcription
+  progress.rs             panel completion logic (single source of truth)
+docs/                     provider configuration and architecture notes (Chinese)
 ```
 
-## 已知边界
+## Known limitations
 
-- 剪辑面板的导出是「主视频轨按起点排序依次拼接（**每个片段自己的音轨一起拼进来**，
-  无音轨的用等长静音补齐）+ 音频轨片段混在其上 + 可选烧字幕」，
-  转场、变速曲线、多轨叠加合成还没做。
-- whisper 的进程内推理需要 libclang 才能编译，本机没装，**这条路径尚未实测**；
-  外部 CLI 路径与能力探测是通的。
-- agent 的花钱工具（生图 / 生视频）默认要人工确认，可在设置里关掉。
+- The edit panel's export is "concatenate the main video track in start-time order (**each
+  clip's own audio track comes along**, padded with equal-length silence if absent) + audio
+  clips mixed on top + optional burned-in subtitles". Transitions, speed curves, and
+  multi-track compositing are not implemented.
+- whisper's in-process inference needs libclang to compile and hasn't been tested on the
+  author's machine; the external CLI path and capability detection are verified working.
+- The agent's spend tools (image/video generation) require manual confirmation by default;
+  this can be turned off in settings.
 
-## 已经实测过的部分
+## Third-party components
 
-`cargo run -- --pipeline-check` 目前全绿，覆盖：建项目 → 圣经/风格 → 章节 →
-分镜 → 资产 → **真实调用 ffmpeg 出图**（占位适配器）→ 提示词拼装 → **出视频** →
-铺时间线 → **导出成片（1080×1920，带音轨）** → 字幕能力探测 → 面板完成度统计。
+The build scripts fetch these at prepare time; their source isn't vendored here.
 
-`cargo run -- --net-check` 在开着 v2rayN 的机器上验证了系统代理能被正确识别与使用。
+| Component | Used for | License |
+| --- | --- | --- |
+| [DirectorDesk](https://github.com/mangfufu/director-desk) | 3D previz panel | MIT |
+| [pi](https://github.com/earendil-works/pi) | optional agent engine sidecar | MIT |
+| [ffmpeg / ffprobe](https://ffmpeg.org/) | transcoding, edit export | LGPL / GPL (per build) |
+| [whisper.cpp](https://github.com/ggerganov/whisper.cpp) | speech recognition | MIT |
+| [Tauri](https://tauri.app/), [Vue](https://vuejs.org/) | app shell and frontend | MIT |
+
+Package dependencies and their licenses are listed in `package.json` / `src-tauri/Cargo.toml`.
+
+## License
+
+Licensed under the [Apache License, Version 2.0](LICENSE).

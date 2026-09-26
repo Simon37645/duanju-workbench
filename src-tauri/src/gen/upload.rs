@@ -1,6 +1,6 @@
 //! 通用文件上传。
 //!
-//! 有些生图 / 生视频接口不接受 base64，只收**公网可访问的 URL**（第三方平台 的 ComfyUI 工作流就是
+//! 有些生图 / 生视频接口不接受 base64，只收**公网可访问的 URL**（不少 ComfyUI 工作流平台就是
 //! 这样：`first_frame`、`ref_image_0` 都写明"图片 URL"）。本地生成的资产图必须先传上去。
 //!
 //! 这里实现两种模式，用 provider 的 `options.upload` 配置选择：
@@ -16,7 +16,7 @@
 //! }
 //! ```
 //!
-//! **chunked** —— 第三方平台 用的三段式（先换 token，再声明分片，最后逐片 PUT）：
+//! **chunked** —— 三段式（先换 token，再声明分片，最后逐片 PUT）：
 //! ```jsonc
 //! "upload": {
 //!   "mode": "chunked",
@@ -100,7 +100,7 @@ impl UploadConfig {
 }
 
 /// 有些平台认证失败时照样返回 HTTP 200，只在 body 里放 `code`/`msg`
-/// （第三方平台 就是这样：`{"code":"AuthorizeFailed","msg":"认证失败; 登录超时"}`）。
+/// （某些平台就是这样：`{"code":"AuthorizeFailed","msg":"认证失败; 登录超时"}`）。
 /// 不先查这个的话，报出来的错会是"没找到 token"，完全看不出真正原因。
 fn check_envelope(v: &Value, what: &str) -> Result<()> {
     let Some(code) = v.get("code").and_then(|c| c.as_str()) else {

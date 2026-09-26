@@ -1,10 +1,13 @@
 [package]
 name = "duanju-workbench"
 version = "0.1.0"
-description = "短剧全流程制作工作台"
-authors = ["duanju"]
+description = "Short-drama production workbench — script to finished cut"
+authors = ["duanju-workbench contributors"]
 edition = "2021"
 rust-version = "1.77"
+license = "Apache-2.0"
+repository = "https://github.com/Simon37645/duanju-workbench"
+homepage = "https://github.com/Simon37645/duanju-workbench"
 
 [lib]
 name = "duanju_workbench_lib"
@@ -38,7 +41,7 @@ uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 blake3 = "1"
 base64 = "0.22"
-# 上传到只收公网 URL 的平台（如 第三方平台）时要算文件 md5，用于去重与定位
+# 上传到只收公网 URL 的平台（如 ComfyUI 工作流服务）时要算文件 md5，用于去重与定位
 md5 = "0.7"
 # 导入技能压缩包（自带 enclosed_name 防 zip-slip）
 zip = { version = "2", default-features = false, features = ["deflate"] }
