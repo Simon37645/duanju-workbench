@@ -11,6 +11,7 @@
 src/ui/            自研设计系统（tokens.css + base.css + 20 个组件）
 src/dev/mock.ts    浏览器预览用的假后端（不在 Tauri 里时自动启用）
 src/stores/        Pinia：项目 / agent / 任务 / 设置
+src/utils/         导演台前端桥（agent 工具调用 → 面板 iframe，面板没开时自动切过去）
 src/components/    外壳：侧栏、顶栏、agent 对话坞、任务条、设置抽屉
 src/views/panels/  九个面板
 ```
@@ -29,7 +30,7 @@ src/views/panels/  九个面板
                 │ invoke / Channel / event
 ┌───────────────▼───────────────── Rust 后端 ───────────────────────┐
 │  commands.rs      前端唯一入口（薄封装）                            │
-│  agent/           会话、工具循环、缓存友好提示词装配、38 个工具        │
+│  agent/           会话、工具循环、缓存友好提示词装配、46 个工具        │
 │  pi.rs            pi sidecar（RPC）：可选对话引擎，常驻进程 + 事件映射  │
 │  pi_bridge.rs     pi 工具桥：本地 HTTP，extension ↔ Rust 的工具与审批   │
 │  actions.rs       高层动作（生图/生视频/铺轨/导出/转写）             │
@@ -40,6 +41,7 @@ src/views/panels/  九个面板
 │  asr.rs           whisper 能力探测 / 模型下载（断点续传）/ 转写       │
 │  net.rs           代理解析（系统代理 / 环境变量 / 手动）              │
 │  selftest.rs      命令行自检（不启动界面，跑真实链路）                │
+│  director.rs      导演台桥：agent 工具 → 前端 iframe（事件 + oneshot）  │
 │  progress.rs      面板完成度判定（唯一事实来源）                     │
 │  project.rs       项目目录布局 + 加载保存                            │
 │  store.rs         原子写 / JSON / Markdown / 字数 / 指纹             │

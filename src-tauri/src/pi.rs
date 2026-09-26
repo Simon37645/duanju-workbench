@@ -246,7 +246,23 @@ export default async function (pi: ExtensionAPI) {
               data === undefined || data === null
                 ? summary
                 : `${summary}\n\n\`\`\`json\n${JSON.stringify(data).slice(0, 12000)}\n\`\`\``;
-            return { content: [{ type: "text", text }], details: {} };
+            const content: Array<Record<string, unknown>> = [{ type: "text", text }];
+            // 工具带回来的图片（比如 director_frame 渲染的那一帧）跟着结果一起给模型
+            const images = (r.result?.images ?? []) as Array<{
+              label?: string;
+              mediaType?: string;
+              data?: string;
+            }>;
+            for (const img of images) {
+              if (!img?.data) continue;
+              if (img.label) content.push({ type: "text", text: `【图片】${img.label}` });
+              content.push({
+                type: "image",
+                data: img.data,
+                mimeType: img.mediaType ?? "image/png",
+              });
+            }
+            return { content, details: {} };
           }
           return {
             content: [{ type: "text", text: `工具执行失败：${r?.error ?? "未知错误"}` }],
@@ -297,6 +313,14 @@ const WORKBENCH_SYSTEM_PROMPT: &str = r#"你是「短剧工作台」的制作协
 一切对项目数据的读写都必须通过提供的工具完成（project_snapshot、script_*、storyboard_*、
 asset_*、prompt_*、video_*、edit_*、subtitle_*、bible_update、checklist_report、ask_user 等）。
 pi 自带的 shell / 文件读写工具在这里已被禁用：唯一有效的操作通道就是工作台的工具链。
+
+3D 预演面板里是导演台（DirectorDesk，MIT 开源）：白模布景、人物走位、运镜、灯光都能直接操作，不要只给建议。
+工具：director_scene（读工程现状）、director_tool（调导演台自己的工具，name + args 透传）、
+director_frame（渲染一帧画面，你会真的看到这张图）。
+流程：director_read 看现状（顺便拿 revision）→ 需要时 director_skill 读操作说明 →
+director_apply 提交编辑 → director_frame 渲一帧核对。
+你看不到用户的屏幕，只有 director_frame 能把画面送到你眼前：改完必须自己渲一帧检查构图、人物朝向、
+有没有穿模，不要凭想象汇报完成。
 
 工作准则：
 1. 只用中文回复，直接给结果，不要寒暄、不要复述用户已经说过的话。

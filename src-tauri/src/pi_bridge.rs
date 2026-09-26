@@ -1,4 +1,4 @@
-//! pi 工具桥：让 pi 引擎调用工作台的 38 个工具。
+//! pi 工具桥：让 pi 引擎调用工作台的 46 个工具。
 //!
 //! pi 的 extension 跑在 sidecar 进程里，碰不到 Rust 的状态，所以这里起一个
 //! **只监听 127.0.0.1** 的极简 HTTP 服务，extension 通过它回调：
@@ -250,9 +250,23 @@ pub async fn run_tool(state: &AppState, name: &str, args: Value) -> Result<Value
         panel: PanelId::Script,
     };
     let out = (tool.run)(ctx, args).await?;
+    // images 在 ToolOutcome 上是 #[serde(skip)]（自研引擎直接读字段），
+    // 这里手动带上，extension 会把它们作为图片块回给 pi，模型就能「看见」。
+    let images: Vec<Value> = out
+        .images
+        .iter()
+        .map(|i| {
+            json!({
+                "label": i.label,
+                "mediaType": i.media_type,
+                "data": i.data_b64,
+            })
+        })
+        .collect();
     Ok(json!({
         "summary": out.summary,
         "data": out.data,
+        "images": images,
     }))
 }
 

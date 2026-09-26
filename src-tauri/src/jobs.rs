@@ -54,6 +54,19 @@ impl JobQueue {
         *self.inner.app.write() = Some(app);
     }
 
+    /// 调整某一类任务的并发闸门（`"image"` / `"video"` …）。
+    ///
+    /// 设置里每个 provider 都有 `concurrency`，但队列闸门原本是写死的常量，
+    /// 供应商只准收 1 个并发时就会一路 429。启动与保存设置时用这个对齐。
+    /// 只对之后提交的任务生效：已提交的任务在提交那一刻就拿到了旧的信号量。
+    pub fn set_gate(&self, key: &'static str, permits: usize) {
+        let n = permits.max(1);
+        self.inner
+            .gates
+            .write()
+            .insert(key, Arc::new(Semaphore::new(n)));
+    }
+
     /// 切换项目时把队列历史挂到当前项目；传 None 表示不持久化。
     pub fn set_persist_path(&self, path: Option<std::path::PathBuf>) {
         *self.inner.persist_path.write() = path.clone();

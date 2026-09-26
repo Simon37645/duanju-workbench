@@ -63,6 +63,40 @@ pub fn director_tool() -> Value {    json!({
     })
 }
 
+/// 导演台渲染一帧：agent 靠它看见自己搭的景
+pub fn director_frame() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "source": {
+                "type": "string",
+                "enum": ["camera", "editor"],
+                "description": "取景来源：camera = 机位取景（默认，可指定 cameraId 与分辨率）；editor = 用户正看着的布景视图（自由视角，分辨率跟面板走）"
+            },
+            "cameraId": {
+                "type": "string",
+                "description": "机位实体 ID；不传用导演台当前的预览机位，program 表示成片机位"
+            },
+            "time": {
+                "type": "number",
+                "description": "渲染第几秒的画面；不传用当前时间轴位置"
+            },
+            "width": {
+                "type": "integer",
+                "description": "宽度像素；不传按项目画幅来（长边 1024），仅 source=camera 有效"
+            },
+            "height": {
+                "type": "integer",
+                "description": "高度像素；不传按项目画幅推算，仅 source=camera 有效"
+            },
+            "note": {
+                "type": "string",
+                "description": "这一帧想看什么，会写进图片标签方便你自己分辨，例如「客厅全景」"
+            }
+        }
+    })
+}
+
 pub fn sections() -> Value {
     obj(
         json!({

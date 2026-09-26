@@ -56,6 +56,8 @@ pub fn run() {
             tracing::info!("配置目录: {}", dir.display());
             let state = AppState::new(dir);
             state.attach_app(app.handle().clone());
+            // 让队列闸门跟上设置里的 provider 并发
+            state.apply_provider_concurrency();
             // 随包分发的 whisper 模型首启补种（大文件拷贝，放后台别挡启动）
             let seed_state = state.clone();
             tauri::async_runtime::spawn_blocking(move || crate::asr::seed_bundled_models(&seed_state));

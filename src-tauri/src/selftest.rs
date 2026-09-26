@@ -1081,3 +1081,217 @@ pub async fn run_pipeline_check() -> i32 {
     }
     failures as i32
 }
+
+/// 批量生成资产图：不启动界面，用真实配置跑真实供应商。
+///
+/// 走的是与界面完全相同的 `actions::generate_asset_views`，因此任务入队、
+/// 落盘、状态回写都和点「生成」按钮一致；区别只是没有花钱确认弹窗。
+///
+/// ```bash
+/// cargo run -- --gen-assets "E:\项目"              # 只补没有出图的视图
+/// cargo run -- --gen-assets "E:\项目" --force       # 全部重出
+/// cargo run -- --gen-assets "E:\项目" --only 噜噜    # 只做名字里含「噜噜」的资产
+/// cargo run -- --gen-assets "E:\项目" --limit 3     # 最多提交 3 个视图
+/// ```
+pub async fn run_gen_assets(
+    project_path: &str,
+    force: bool,
+    only: Option<String>,
+    limit: Option<usize>,
+) -> i32 {
+    println!("\n=== 短剧工作台 · 资产批量生成 ===\n");
+
+    let root = std::path::PathBuf::from(project_path);
+    let project = match Project::open(&root) {
+        Ok(p) => p,
+        Err(e) => {
+            fail("打开项目", e);
+            return 1;
+        }
+    };
+    ok("打开项目", project.paths.root.display());
+
+    // 真实配置目录：与界面共用同一份 settings.json / secrets.json
+    let state = AppState::new(crate::config::default_config_dir());
+    state.apply_provider_concurrency();
+    let cfg = match state.active_provider(ProviderKind::Image) {
+        Some(c) => c,
+        None => {
+            fail("生图供应商", "没有启用任何生图 provider");
+            return 1;
+        }
+    };
+    ok(
+        "生图供应商",
+        format!("{} · {} · {}", cfg.name, cfg.model, cfg.base_url),
+    );
+    if state.api_key_for(&cfg).is_none() {
+        fail("API Key", "该供应商没有配置密钥");
+        return 1;
+    }
+    state.set_project(Some(project));
+    if let Err(e) = state.http_client() {
+        fail("HTTP 客户端", e);
+        return 1;
+    }
+    ok("HTTP 客户端", "已构建");
+
+    /* -------------------------------------------------------- 待生成清单 */
+    let plan = match state.read(|p| {
+        p.assets
+            .iter()
+            .map(|a| {
+                let pending = a
+                    .views
+                    .iter()
+                    .filter(|v| {
+                        force
+                            || !matches!(
+                                v.status,
+                                AssetStatus::Done | AssetStatus::Running | AssetStatus::Queued
+                            )
+                    })
+                    .count();
+                (a.id.clone(), a.name.clone(), a.views.len(), pending)
+            })
+            .collect::<Vec<_>>()
+    }) {
+        Ok(v) => v,
+        Err(e) => {
+            fail("读取资产", e);
+            return 1;
+        }
+    };
+
+    let mut selected: Vec<(String, String, usize, usize)> = plan
+        .into_iter()
+        .filter(|(id, name, _, pending)| {
+            *pending > 0
+                && only
+                    .as_ref()
+                    .map_or(true, |k| name.contains(k.as_str()) || id == k)
+        })
+        .collect();
+
+    // --limit：按视图数截断，方便先小批量试水
+    if let Some(max) = limit {
+        let mut acc = 0usize;
+        selected.retain_mut(|(_, _, _, pending)| {
+            if acc >= max {
+                return false;
+            }
+            acc += *pending;
+            true
+        });
+    }
+
+    if selected.is_empty() {
+        println!("  没有需要生成的视图（都出图了？加 --force 可全部重出）。\n");
+        return 0;
+    }
+    let total_views: usize = selected.iter().map(|(_, _, _, p)| *p).sum();
+    println!(
+        "\n  待生成：{} 个资产 / {} 个视图\n",
+        selected.len(),
+        total_views
+    );
+
+    /* ------------------------------------------------------------ 提交 */
+    let mut submitted = 0usize;
+    for (id, name, views, pending) in &selected {
+        match actions::generate_asset_views(&state, id, vec![], force) {
+            Ok(ids) => {
+                submitted += ids.len();
+                println!("  → {name}：提交 {} 个（共 {} 个视图，待生成 {}）", ids.len(), views, pending);
+            }
+            Err(e) => fail(&format!("提交 {name}"), e),
+        }
+    }
+    if submitted == 0 {
+        println!("\n  没有任何任务被提交。\n");
+        return 1;
+    }
+    println!("\n  已提交 {submitted} 个任务，等待完成…\n");
+
+    /* ------------------------------------------------------------ 等待 */
+    let started = Instant::now();
+    let mut last = (u32::MAX, u32::MAX);
+    loop {
+        let jobs = state.jobs.snapshot();
+        let running = jobs
+            .iter()
+            .filter(|j| matches!(j.status, JobStatus::Running | JobStatus::Queued))
+            .count();
+        let done = jobs.iter().filter(|j| j.status == JobStatus::Done).count() as u32;
+        let failed = jobs.iter().filter(|j| j.status == JobStatus::Failed).count() as u32;
+        if (done, failed) != last {
+            println!(
+                "  [{:>6.0}s] 完成 {} · 失败 {} · 进行中 {}",
+                started.elapsed().as_secs_f32(),
+                done,
+                failed,
+                running
+            );
+            last = (done, failed);
+        }
+        if running == 0 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(1000)).await;
+    }
+
+    /* ------------------------------------------------------------ 汇总 */
+    let jobs = state.jobs.snapshot();
+    let failed_jobs: Vec<_> = jobs
+        .iter()
+        .filter(|j| j.status == JobStatus::Failed)
+        .collect();
+    if !failed_jobs.is_empty() {
+        println!("\n  失败任务：");
+        for j in &failed_jobs {
+            println!("    ! {} — {}", j.title, j.error.clone().unwrap_or_default());
+        }
+    }
+
+    println!("\n  资产完成度：");
+    let summary = state
+        .read(|p| {
+            p.assets
+                .iter()
+                .map(|a| {
+                    let done = a
+                        .views
+                        .iter()
+                        .filter(|v| matches!(v.status, AssetStatus::Done))
+                        .count();
+                    let failed = a
+                        .views
+                        .iter()
+                        .filter(|v| matches!(v.status, AssetStatus::Failed))
+                        .count();
+                    (a.name.clone(), done, failed, a.views.len())
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let (mut all_done, mut all_total) = (0usize, 0usize);
+    for (name, done, failed, total) in summary {
+        all_done += done;
+        all_total += total;
+        let flag = if failed > 0 { "  ← 有失败" } else { "" };
+        println!("    {name}: {done}/{total}{flag}");
+    }
+
+    let wall = started.elapsed().as_secs_f32();
+    println!(
+        "\n  合计 {all_done}/{all_total} 张，用时 {wall:.0}s\n  项目：{}\n",
+        root.display()
+    );
+    if all_done >= all_total && all_total > 0 {
+        println!("=== 资产全部生成完成 ===\n");
+        0
+    } else {
+        println!("=== 仍有未完成视图 ===\n");
+        1
+    }
+}

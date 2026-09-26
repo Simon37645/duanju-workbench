@@ -13,6 +13,10 @@
 //! ```
 //!
 //! 工程数据随项目保存：`<项目>/previz/director.json`。
+//!
+//! 面板不需要用户手动打开：前端桥（`src/utils/directorBridge.ts`）收到调用后
+//! 会自己切到「3D预演」并把 iframe 拉起来，拿不到才报错（约 15 秒）。这里的
+//! 超时只是兜底，防止前端整个卡死时 agent 永远等下去。
 
 use std::time::Duration;
 
@@ -23,6 +27,9 @@ use crate::error::{AppError, Result};
 use crate::state::AppState;
 
 pub const EVENT_DIRECTOR_CALL: &str = "director://call";
+
+/// 兜底超时：前端自己的就绪等待约 15 秒，编辑类调用本身可能跑一会儿。
+const CALL_TIMEOUT: Duration = Duration::from_secs(90);
 
 /// 让前端（iframe 里的导演台）执行一个操作并等待回执。
 pub async fn call_director(state: &AppState, name: &str, args: Value) -> Result<Value> {
@@ -39,13 +46,15 @@ pub async fn call_director(state: &AppState, name: &str, args: Value) -> Result<
         EVENT_DIRECTOR_CALL,
         json!({"callId": call_id, "name": name, "args": args}),
     );
-    match tokio::time::timeout(Duration::from_secs(60), rx).await {
+    match tokio::time::timeout(CALL_TIMEOUT, rx).await {
         Ok(Ok(result)) => result,
-        Ok(Err(_)) => Err(AppError::other("导演台未响应（面板可能没打开）")),
+        Ok(Err(_)) => Err(AppError::other(
+            "导演台没有回执（面板可能加载失败）——打开「3D预演」面板确认它能正常显示",
+        )),
         Err(_) => {
             state.agent.director_calls.lock().remove(&call_id);
             Err(AppError::other(
-                "导演台执行超时（60s）——先在「3D预演 → 导演台」里把面板打开再试",
+                "导演台执行超时（90s）——打开「3D预演」面板看它是否卡住了",
             ))
         }
     }

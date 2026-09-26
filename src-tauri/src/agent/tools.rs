@@ -37,6 +37,7 @@ pub const READ_ONLY_TOOLS: &[&str] = &[
     "skill_read",
     "skill_read_file",
     "director_scene",
+    "director_frame",
 ];
 
 pub fn is_read_only(name: &str) -> bool {
@@ -1862,6 +1863,59 @@ async fn t_skill_add(ctx: ToolCtx, args: Value) -> Result<ToolOutcome> {
 
 /* ============================ 3D 预演（导演台） ============================ */
 
+/// 导演台自己的工具清单（对应它 0.4.8 的 contract.ts）。
+/// 工具描述与「名字传错」时的纠错提示共用这一份，避免两处走偏。
+pub const DIRECTOR_TOOLS: &[&str] = &[
+    "director_skill",
+    "director_read",
+    "director_apply",
+    "director_scene",
+    "director_nodes",
+    "director_spatial",
+    "director_path_surface",
+    "director_assets",
+    "director_motions",
+    "director_media",
+    "director_view",
+    "director_export",
+    "director_continuity",
+    "director_scan",
+    "director_history",
+    "director_help",
+    "director_job",
+    "director_stride",
+];
+
+/// 模型爱把工具名写成 `apply`、`director-apply`、大写之类，统一成导演台认的形式。
+fn normalize_director_tool(name: &str) -> String {
+    let n = name.trim().to_ascii_lowercase().replace(['-', ' '], "_");
+    if n.starts_with("director_") {
+        n
+    } else {
+        format!("director_{n}")
+    }
+}
+
+/// 把 data URL 拆成 (media_type, base64)
+fn split_data_url(url: &str) -> Result<(String, String)> {
+    let rest = url
+        .strip_prefix("data:")
+        .ok_or_else(|| AppError::other("导演台返回的图片格式不对（不是 data URL）"))?;
+    let (meta, data) = rest
+        .split_once(',')
+        .ok_or_else(|| AppError::other("导演台返回的图片格式不对（缺少数据段）"))?;
+    if !meta.contains("base64") {
+        return Err(AppError::other("导演台返回的图片没有用 base64 编码"));
+    }
+    let media_type = meta
+        .split(';')
+        .next()
+        .filter(|s| s.starts_with("image/"))
+        .unwrap_or("image/png")
+        .to_string();
+    Ok((media_type, data.to_string()))
+}
+
 /// 读导演台工程现状（走它的 director_read —— 为 agent 设计的友好读取）
 async fn director_scene(ctx: ToolCtx, _args: Value) -> Result<ToolOutcome> {
     let v = crate::director::call_director(&ctx.state, "director_read", json!({})).await?;
@@ -1870,10 +1924,94 @@ async fn director_scene(ctx: ToolCtx, _args: Value) -> Result<ToolOutcome> {
 
 /// 调导演台自己的工具编辑工程
 async fn director_action(ctx: ToolCtx, args: Value) -> Result<ToolOutcome> {
-    let name = arg_str(&args, "name")?;
+    let raw = arg_str(&args, "name")?;
+    let name = normalize_director_tool(&raw);
     let params = args.get("args").cloned().unwrap_or_else(|| json!({}));
-    let v = crate::director::call_director(&ctx.state, &name, params).await?;
-    Ok(ToolOutcome::new(format!("导演台「{name}」执行完成"), v))
+    match crate::director::call_director(&ctx.state, &name, params).await {
+        Ok(v) => Ok(ToolOutcome::new(format!("导演台「{name}」执行完成"), v)),
+        // 名字猜错时把可用清单还给它，别只说「未知工具」三个字
+        Err(e) if e.to_string().contains("未知工具") => Err(AppError::invalid(format!(
+            "导演台没有「{name}」这个工具。可用工具：{}。\
+先 director_skill 拿操作说明、director_read 读现状，再用 director_apply 提交编辑。",
+            DIRECTOR_TOOLS.join("、")
+        ))),
+        Err(e) => Err(e),
+    }
+}
+
+/// 渲染导演台的一帧画面，作为图片放进上下文 —— agent 靠它「看见」自己搭的景。
+///
+/// 两种取景：
+/// - `source: "camera"`（默认）走它自己的导出渲染管线（engine.renderOutput），
+///   可以指定机位与分辨率，画面干净、和成片取景一致；
+/// - `source: "editor"` 直接取布景视图画布（用户正看着的那个角度），
+///   分辨率跟着面板大小走。
+async fn director_frame(ctx: ToolCtx, args: Value) -> Result<ToolOutcome> {
+    let mut params = serde_json::Map::new();
+    for key in ["source", "cameraId", "time", "width", "height", "note"] {
+        if let Some(v) = args.get(key) {
+            if !v.is_null() {
+                params.insert(key.to_string(), v.clone());
+            }
+        }
+    }
+    let v = crate::director::call_director(&ctx.state, "__capture_frame", Value::Object(params))
+        .await?;
+
+    let data_url = v
+        .get("dataUrl")
+        .and_then(Value::as_str)
+        .ok_or_else(|| AppError::other("导演台没有返回画面数据"))?;
+    let (media_type, data_b64) = split_data_url(data_url)?;
+    let bytes = data_b64.len() / 4 * 3;
+    if bytes as u64 > MAX_TOOL_IMAGE_BYTES {
+        return Err(AppError::invalid(format!(
+            "渲染出来的画面太大（约 {}MB）——把 width/height 调小一点再渲（比如 800×450）",
+            bytes / 1024 / 1024
+        )));
+    }
+
+    let source = v.get("source").and_then(Value::as_str).unwrap_or("camera");
+    let width = v.get("width").and_then(Value::as_u64).unwrap_or(0);
+    let height = v.get("height").and_then(Value::as_u64).unwrap_or(0);
+    let time = v.get("time").and_then(Value::as_f64).unwrap_or(0.0);
+    let camera_id = v.get("cameraId").and_then(Value::as_str).unwrap_or("");
+    let note = arg_opt_str(&args, "note").unwrap_or_default();
+    let label = if note.is_empty() {
+        format!(
+            "导演台画面 · {}",
+            if source == "editor" {
+                "布景视图".to_string()
+            } else {
+                format!("机位 {camera_id}")
+            }
+        )
+    } else {
+        format!("导演台画面 · {note}")
+    };
+    let summary = if source == "editor" {
+        format!("已渲染布景视图（{width}×{height}），画面已放进你的上下文")
+    } else {
+        format!(
+            "已渲染机位 {camera_id} 在 {time:.1}s 的画面（{width}×{height}），画面已放进你的上下文"
+        )
+    };
+
+    Ok(ToolOutcome::new(
+        summary,
+        json!({
+            "source": source,
+            "cameraId": camera_id,
+            "time": time,
+            "width": width,
+            "height": height,
+        }),
+    )
+    .with_images(vec![ToolImage {
+        label,
+        media_type,
+        data_b64,
+    }]))
 }
 
 /* ============================ 注册表 ============================ */
@@ -2272,17 +2410,30 @@ pub fn registry(_panel: PanelId) -> Vec<Tool> {
     tools.push(tool!(
         "director_tool",
         "操作 3D 预演（导演台）",
-        "调用导演台的能力编辑预演工程（布景 / 走位 / 运镜 / 灯光等）。name 必须是它自己的工具名：\
+        format!(
+            "调用导演台的能力编辑预演工程（布景 / 走位 / 运镜 / 灯光等）。name 必须是它自己的工具名：\
 director_skill（先读它拿操作说明与用法，最保险的第一步）、director_read（读现状，优先用它而不是猜）、\
 director_apply（执行编辑，最常用）、\
 director_scene / director_nodes / director_spatial / director_path_surface（场景、层级、空间与路径）、\
 director_assets / director_motions / director_media（资产库、动作库与素材）、\
 director_view / director_export / director_continuity / director_scan / director_history / director_help / director_job / director_stride。\
-建议流程：director_skill 拿说明 → director_read 看现状 → director_apply 改。args 传该工具的参数对象。\
-需要用户先在「3D预演」面板打开导演台。",
+完整清单：{}。\
+建议流程：director_skill 拿说明 → director_read 看现状 → director_apply 改。args 传该工具的参数对象。",
+            DIRECTOR_TOOLS.join("、")
+        ),
         schema::director_tool(),
         false,
         director_action
+    ));
+    tools.push(tool!(
+        "director_frame",
+        "渲染 3D 预演的一帧画面",
+        "把导演台当前的画面渲染成一帧图放进你的上下文——这是你唯一能「看见」3D 预演的方式（你看不到用户屏幕）。\
+改完布景、走位、机位之后用它核对构图：人物朝向、有没有穿模、机位高度对不对。\
+默认渲染当前预览机位；source=editor 取用户正看着的布景视图，source=camera + cameraId 取指定机位。",
+        schema::director_frame(),
+        false,
+        director_frame
     ));
 
     tools

@@ -7,6 +7,8 @@ fn main() {
     //   cargo run -- --net-check        代理与模型仓库连通性
     //   cargo run -- --pi-check [项目]   pi 引擎真实对话链路（会消耗少量额度）
     //   cargo run -- --asr-download ggml-tiny   预下载 whisper 模型
+    //   cargo run -- --gen-assets <项目> [--force] [--only 名字] [--limit N]
+    //                                           用真实供应商批量出资产图
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|a| a == "--pipeline-check") {
         let code =
@@ -44,6 +46,30 @@ fn main() {
         let model = args.get(i + 1).cloned().unwrap_or_else(|| "ggml-tiny".into());
         let code =
             tauri::async_runtime::block_on(duanju_workbench_lib::selftest::run_asr_download(&model));
+        std::process::exit(code);
+    }
+
+    if let Some(i) = args.iter().position(|a| a == "--gen-assets") {
+        let path = args.get(i + 1).filter(|s| !s.starts_with("--")).cloned();
+        let Some(path) = path else {
+            eprintln!("用法：cargo run -- --gen-assets <项目路径> [--force] [--only 名字] [--limit N]");
+            std::process::exit(2);
+        };
+        let force = args.iter().any(|a| a == "--force");
+        let only = args
+            .iter()
+            .position(|a| a == "--only")
+            .and_then(|k| args.get(k + 1))
+            .filter(|s| !s.starts_with("--"))
+            .cloned();
+        let limit = args
+            .iter()
+            .position(|a| a == "--limit")
+            .and_then(|k| args.get(k + 1))
+            .and_then(|s| s.parse::<usize>().ok());
+        let code = tauri::async_runtime::block_on(duanju_workbench_lib::selftest::run_gen_assets(
+            &path, force, only, limit,
+        ));
         std::process::exit(code);
     }
 

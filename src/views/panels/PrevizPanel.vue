@@ -6,15 +6,15 @@
  * - 它的构建产物随应用分发（scripts/prepare-director.mjs 生成），iframe 承载
  *   （隔离它自己的全局样式），加载后注入换皮样式对齐工作台设计；
  * - 工程随项目保存到 <项目>/previz/director.json（顶部条「保存/恢复工程」）；
- * - agent（自研 / pi 两个引擎）通过 Rust 事件桥调用它的 __director 接口，
- *   能读预演工程、布景、排走位、设计运镜。
+ * - agent（自研 / pi 两个引擎）的工具调用经 `@/utils/directorBridge` 落到这里：
+ *   桥负责面板没开时自动切过来，本组件只把 `window.__director` 注册给它。
  */
 import { onBeforeUnmount, onMounted, ref } from "vue";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { FolderOpen, Save } from "@lucide/vue";
 import UiButton from "@/ui/Button.vue";
 import { api, errorText } from "@/api/ipc";
 import { toast } from "@/ui";
+import { registerDirectorProvider, type DirectorApi } from "@/utils/directorBridge";
 
 const ddFrame = ref<HTMLIFrameElement | null>(null);
 const ddSrc = `${import.meta.env.BASE_URL || "/"}director/index.html`;
@@ -51,15 +51,6 @@ function onDdLoad() {
   setTimeout(kick, 800);
 }
 
-/** 导演台暴露的自动化接口（window.__director，同源可直接访问） */
-interface DirectorApi {
-  callTool: (
-    name: string,
-    args?: Record<string, unknown>,
-  ) => Promise<{ ok: boolean; data?: unknown; error?: string }>;
-  getDocument: () => unknown;
-  replaceProject: (doc: unknown) => void;
-}
 function ddApi(): DirectorApi | null {
   return (
     (ddFrame.value?.contentWindow as unknown as { __director?: DirectorApi } | null)?.__director ??
@@ -94,36 +85,13 @@ async function loadDirector() {
   }
 }
 
-/** agent（自研 / pi 引擎）通过事件桥调导演台：执行并把结果回填 */
-let unlistenDirector: UnlistenFn | null = null;
-async function handleDirectorCall(payload: { callId: string; name: string; args?: unknown }) {
-  try {
-    const director = ddApi();
-    if (!director) throw new Error("导演台还没加载完成，稍等一下再试");
-    let data: unknown;
-    if (payload.name === "__get_document") {
-      data = director.getDocument();
-    } else {
-      const r = await director.callTool(payload.name, (payload.args as Record<string, unknown>) ?? {});
-      if (!r?.ok) throw new Error(r?.error ?? "执行失败");
-      data = r.data;
-    }
-    await api.directorResult(payload.callId, true, data);
-  } catch (e) {
-    await api.directorResult(payload.callId, false, null, errorText(e)).catch(() => {});
-  }
-}
-
 onMounted(() => {
-  listen<{ callId: string; name: string; args?: unknown }>("director://call", (e) => {
-    void handleDirectorCall(e.payload);
-  })
-    .then((fn) => (unlistenDirector = fn))
-    .catch(() => {}); // 浏览器预览没有 Tauri
+  // agent 的工具调用走全局桥；这里只提供「当前 iframe 的 __director」
+  registerDirectorProvider(ddApi);
 });
 
 onBeforeUnmount(() => {
-  unlistenDirector?.();
+  registerDirectorProvider(null);
 });
 </script>
 

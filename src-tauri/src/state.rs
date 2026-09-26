@@ -97,7 +97,20 @@ impl AppState {
     }
 
     pub fn save_settings(&self, s: &AppSettings) -> Result<()> {
-        self.config.save_settings(s)
+        self.config.save_settings(s)?;
+        self.apply_provider_concurrency();
+        Ok(())
+    }
+
+    /// 把生图 / 生视频 provider 的 `concurrency` 同步到任务队列闸门。
+    /// 启动时、保存设置后各调一次 —— 否则设置里那个数字只是个摆设。
+    pub fn apply_provider_concurrency(&self) {
+        if let Some(c) = self.active_provider(ProviderKind::Image) {
+            self.jobs.set_gate("image", c.concurrency as usize);
+        }
+        if let Some(c) = self.active_provider(ProviderKind::Video) {
+            self.jobs.set_gate("video", c.concurrency as usize);
+        }
     }
 
     pub fn provider(&self, id: &str) -> Option<ProviderConfig> {

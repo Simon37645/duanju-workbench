@@ -7,6 +7,7 @@ import TourOverlay from "@/components/TourOverlay.vue";
 import { useSettingsStore } from "@/stores/settings";
 import { useJobsStore } from "@/stores/jobs";
 import { useProjectStore } from "@/stores/project";
+import { installDirectorBridge } from "@/utils/directorBridge";
 
 const router = useRouter();
 const settings = useSettingsStore();
@@ -24,6 +25,7 @@ watch(
 );
 
 onMounted(async () => {
+  installDirectorBridge();
   await settings.load();
   applyTheme(settings.settings?.theme ?? "dark");
   jobs.bind();
